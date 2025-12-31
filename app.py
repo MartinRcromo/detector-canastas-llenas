@@ -377,3 +377,4 @@ else:
     st.dataframe(sug, use_container_width=True, height=300)
 
 st.caption("Siguiente mejora (cuando me digas): resultados con *quick wins*, filtros por zona/vendedor y sugerencias de productos top dentro de cada subrubro.")
+
