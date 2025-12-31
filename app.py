@@ -1,6 +1,6 @@
-# app.py — Detector de Canastas Llenas (Puntos 1–4)
+# app.py — Detector de Canastas Llenas (Puntos 1–4 PRO)
 # Streamlit Cloud: main file = app.py
-# Reqs: streamlit, pandas, numpy
+# requirements.txt: streamlit, pandas, numpy
 
 import io
 import re
@@ -50,7 +50,6 @@ def _to_number(series: pd.Series) -> pd.Series:
 
 
 def read_any_table(uploaded_file) -> pd.DataFrame:
-    """Lee CSV/Excel con fallback de encoding y separador."""
     name = (uploaded_file.name or "").lower()
 
     if name.endswith(".xlsx") or name.endswith(".xls"):
@@ -58,7 +57,6 @@ def read_any_table(uploaded_file) -> pd.DataFrame:
         return _normalize_columns(df)
 
     raw = uploaded_file.getvalue()
-    # IMPORTANT: utf-8-sig primero para archivos con BOM
     encodings = ["utf-8-sig", "utf-8", "latin1", "utf-16"]
     seps = [";", ",", "\t", "|"]
 
@@ -84,12 +82,9 @@ REQUIRED = {
     "importe": ["importe", "importe_", "importe__"],
     "unidades": ["unidades", "unidad", "qty", "cantidad"],
     "cant_pedidos": ["cant_pedidos", "cantidad_pedidos", "cant_pedido", "pedidos"],
-    "localidad": ["localidad", "ciudad", "zona", "localidad_cliente"],
-    "vendedor": ["vendedor", "zona_comercial", "ejecutivo", "seller"],
     "anio_mes": ["anio_mes", "año_mes", "periodo", "mes", "year_month"],
     "articulo_codigo": ["articulo_codigo", "articulo_cod", "codigo_articulo", "sku", "articulo"],
     "articulo_descripcion": ["articulo_descripcion", "descripcion", "articulo_desc", "producto"],
-    "empresa": ["empresa", "compania", "unidad_de_negocio"],
 }
 
 
@@ -116,27 +111,32 @@ def standardize(df: pd.DataFrame) -> pd.DataFrame:
     if "cliente" not in mapping and "cliente_id" not in mapping:
         raise ValueError("Falta columna de cliente (ej: 'RazonSocial' o 'cliente_id').")
 
+    if "articulo_codigo" not in mapping or "articulo_descripcion" not in mapping:
+        raise ValueError("Para el Punto 4 necesito articulo_codigo y articulo_descripcion.")
+
     df = df.rename(columns={v: k for k, v in mapping.items()})
 
-    # Completar cliente si viene solo id
     if "cliente" not in df.columns and "cliente_id" in df.columns:
         df["cliente"] = df["cliente_id"].astype(str)
 
-    # Limpieza básica
     df["cliente"] = df["cliente"].astype(str).str.strip()
     df["subrubro"] = df["subrubro"].astype(str).str.strip()
+    df["articulo_codigo"] = df["articulo_codigo"].astype(str).str.strip()
+    df["articulo_descripcion"] = df["articulo_descripcion"].astype(str).str.strip()
 
-    # Numéricos
     df["importe"] = _to_number(df.get("importe", pd.Series([0] * len(df)))).fillna(0.0)
     df["unidades"] = _to_number(df.get("unidades", pd.Series([0] * len(df)))).fillna(0.0)
     df["cant_pedidos"] = _to_number(df.get("cant_pedidos", pd.Series([1] * len(df)))).fillna(1.0)
 
-    # anio_mes si existe: mantener como string sortable tipo YYYYMM o YYYY-MM
     if "anio_mes" in df.columns:
         df["anio_mes"] = df["anio_mes"].astype(str).str.strip()
 
-    # Filtrar vacíos
-    df = df[df["cliente"].ne("") & df["subrubro"].ne("")]
+    df = df[
+        df["cliente"].ne("")
+        & df["subrubro"].ne("")
+        & df["articulo_codigo"].ne("")
+        & df["articulo_descripcion"].ne("")
+    ]
     return df
 
 
@@ -145,8 +145,27 @@ def fmt_int(n: int) -> str:
 
 
 def fmt_money(n: float) -> str:
-    # sin símbolo para evitar confusiones de moneda
     return f"{float(n):,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def metric_col_name(rank_metric: str) -> str:
+    return {"importe": "importe", "unidades": "unidades", "pedidos": "cant_pedidos"}[rank_metric]
+
+
+def normalize_period(s: str) -> str:
+    s = (s or "").strip()
+    s = s.replace("/", "-")
+    m = re.match(r"^(\d{4})-(\d{1,2})$", s)
+    if m:
+        y, mo = m.group(1), int(m.group(2))
+        return f"{y}{mo:02d}"
+    m2 = re.match(r"^(\d{6})$", s)
+    if m2:
+        return s
+    digs = re.sub(r"\D", "", s)
+    if len(digs) == 6:
+        return digs
+    return s
 
 
 # -----------------------------
@@ -154,14 +173,12 @@ def fmt_money(n: float) -> str:
 # -----------------------------
 @st.cache_data(show_spinner=False)
 def build_model(df: pd.DataFrame):
-    # Agregado cliente-subrubro
     agg_cs = df.groupby(["cliente", "subrubro"], as_index=False).agg(
         cant_pedidos=("cant_pedidos", "sum"),
         unidades=("unidades", "sum"),
         importe=("importe", "sum"),
     )
 
-    # Matriz compras por cliente (binaria)
     pivot_pedidos = agg_cs.pivot_table(
         index="cliente",
         columns="subrubro",
@@ -169,17 +186,26 @@ def build_model(df: pd.DataFrame):
         aggfunc="sum",
         fill_value=0.0,
     )
-    X_bin = (pivot_pedidos > 0).astype(int).values
 
-    # Co-ocurrencia subrubro-subrubro
-    co = pd.DataFrame(X_bin.T @ X_bin, index=pivot_pedidos.columns, columns=pivot_pedidos.columns)
+    # binaria + normas para cosine similarity (clientes similares)
+    X_bin = (pivot_pedidos > 0).astype(np.float32).values
+    norms = np.linalg.norm(X_bin, axis=1)
+    norms[norms == 0] = 1.0
 
-    # Frecuencia global
+    clients = pivot_pedidos.index.to_numpy()
+    subrubros = pivot_pedidos.columns.to_numpy()
+
+    # co-ocurrencia subrubro-subrubro
+    co = pd.DataFrame(X_bin.T @ X_bin, index=subrubros, columns=subrubros)
+
     freq = pivot_pedidos.sum(axis=0).sort_values(ascending=False)
 
-    # Productos por subrubro (si existen columnas)
-    has_products = ("articulo_descripcion" in df.columns) or ("articulo_codigo" in df.columns)
-    return agg_cs, pivot_pedidos, co, freq, has_products
+    has_period = "anio_mes" in df.columns
+    if has_period:
+        df = df.copy()
+        df["anio_mes_norm"] = df["anio_mes"].map(normalize_period)
+
+    return df, agg_cs, pivot_pedidos, co, freq, X_bin, norms, clients, subrubros, has_period
 
 
 def recommend_for_client(client: str, pivot: pd.DataFrame, co: pd.DataFrame, freq: pd.Series, topk=10):
@@ -218,9 +244,106 @@ def recommend_for_subrubro(subrubro: str, co: pd.DataFrame, freq: pd.Series, top
     return rec
 
 
-def metric_col_name(rank_metric: str) -> str:
-    # rank_metric: "importe" | "unidades" | "pedidos"
-    return {"importe": "importe", "unidades": "unidades", "pedidos": "cant_pedidos"}[rank_metric]
+def top_products_global(df: pd.DataFrame, subrubro: str, rank_metric: str, topn: int, has_period: bool):
+    metric_col = metric_col_name(rank_metric)
+    dfx = df[df["subrubro"] == subrubro].copy()
+
+    g = (
+        dfx.groupby(["articulo_codigo", "articulo_descripcion"], as_index=False)
+        .agg(
+            importe=("importe", "sum"),
+            unidades=("unidades", "sum"),
+            pedidos=("cant_pedidos", "sum"),
+        )
+        .sort_values(metric_col, ascending=False)
+        .head(topn)
+    )
+
+    if has_period and "anio_mes_norm" in dfx.columns:
+        last = (
+            dfx.groupby(["articulo_codigo", "articulo_descripcion"], as_index=False)["anio_mes_norm"]
+            .max()
+            .rename(columns={"anio_mes_norm": "ultimo_mes"})
+        )
+        g = g.merge(last, on=["articulo_codigo", "articulo_descripcion"], how="left")
+
+    return g
+
+
+def top_products_similar_clients(
+    df: pd.DataFrame,
+    selected_cliente: str,
+    subrubro: str,
+    rank_metric: str,
+    topn: int,
+    pivot: pd.DataFrame,
+    X_bin: np.ndarray,
+    norms: np.ndarray,
+    clients: np.ndarray,
+    has_period: bool,
+    neighbors_n: int = 50,
+    exclude_already_bought: bool = True,
+):
+    # si el cliente no está, fallback a global
+    if selected_cliente not in pivot.index:
+        return top_products_global(df, subrubro, rank_metric, topn, has_period)
+
+    idx = np.where(clients == selected_cliente)[0][0]
+    v = X_bin[idx]
+    sim = (X_bin @ v) / (norms * norms[idx])
+    sim[idx] = -1.0  # excluir a sí mismo
+
+    # top vecinos
+    top_idx = np.argsort(sim)[::-1][:neighbors_n]
+    neigh_clients = clients[top_idx]
+    neigh_sim = sim[top_idx]
+
+    dfx = df[(df["subrubro"] == subrubro) & (df["cliente"].isin(neigh_clients))].copy()
+
+    # ponderar por similitud (opcional): peso = sim del vecino
+    weights = pd.DataFrame({"cliente": neigh_clients, "w": neigh_sim})
+    dfx = dfx.merge(weights, on="cliente", how="left")
+    dfx["w"] = dfx["w"].fillna(0.0)
+
+    # score ponderado por similitud
+    # para importe: sum(importe*w), etc.
+    metric_col = metric_col_name(rank_metric)
+    dfx["importe_w"] = dfx["importe"] * dfx["w"]
+    dfx["unidades_w"] = dfx["unidades"] * dfx["w"]
+    dfx["pedidos_w"] = dfx["cant_pedidos"] * dfx["w"]
+
+    g = (
+        dfx.groupby(["articulo_codigo", "articulo_descripcion"], as_index=False)
+        .agg(
+            score=("{}{}".format(rank_metric, "_w") if rank_metric != "pedidos" else "pedidos_w", "sum"),
+            importe=("importe", "sum"),
+            unidades=("unidades", "sum"),
+            pedidos=("cant_pedidos", "sum"),
+            vecinos=("cliente", "nunique"),
+        )
+        .sort_values("score", ascending=False)
+    )
+
+    # excluir productos ya comprados por el cliente (en ese subrubro)
+    if exclude_already_bought:
+        bought = set(
+            df[(df["cliente"] == selected_cliente) & (df["subrubro"] == subrubro)]["articulo_codigo"].unique().tolist()
+        )
+        g = g[~g["articulo_codigo"].isin(bought)]
+
+    g = g.head(topn)
+
+    if has_period and "anio_mes_norm" in df.columns:
+        # ultimo mes global (no por vecino)
+        last = (
+            df[df["subrubro"] == subrubro]
+            .groupby(["articulo_codigo", "articulo_descripcion"], as_index=False)["anio_mes_norm"]
+            .max()
+            .rename(columns={"anio_mes_norm": "ultimo_mes"})
+        )
+        g = g.merge(last, on=["articulo_codigo", "articulo_descripcion"], how="left")
+
+    return g
 
 
 # -----------------------------
@@ -233,7 +356,7 @@ with st.sidebar:
     st.header("Datos")
     uploaded = st.file_uploader("Subí tu archivo (CSV/Excel)", type=["csv", "xlsx", "xls"])
     st.divider()
-    st.caption("Tip: si el CSV viene de Excel, probá ';' como separador (este loader lo detecta).")
+    st.caption("Tip: si el CSV viene de Excel, suele venir con ';' como separador (este loader lo detecta).")
 
 if uploaded is None:
     st.info("Subí un archivo para empezar.")
@@ -246,11 +369,14 @@ except Exception as e:
     st.stop()
 
 try:
-    df = standardize(df_raw)
+    df_std = standardize(df_raw)
 except Exception as e:
     st.error(f"No pude interpretar columnas: {e}")
     st.write("Columnas detectadas:", list(df_raw.columns))
     st.stop()
+
+with st.spinner("Armando modelo..."):
+    df, agg_cs, pivot, co, freq, X_bin, norms, clients, subrubros, has_period = build_model(df_std)
 
 # KPIs
 c1, c2, c3 = st.columns(3)
@@ -258,22 +384,17 @@ c1.metric("Filas", fmt_int(len(df)))
 c2.metric("Clientes", fmt_int(df["cliente"].nunique()))
 c3.metric("Subrubros", fmt_int(df["subrubro"].nunique()))
 
-with st.spinner("Armando modelo..."):
-    agg_cs, pivot, co, freq, has_products = build_model(df)
-
 st.divider()
 
-# Tabs (Punto 1+2) / (Punto 3)  — Punto 4 vive dentro del tab cliente
-tab_cliente, tab_subrubro = st.tabs(["🔎 Por cliente (Punto 1 + 2 + 4)", "🧭 Por subrubro (Punto 3)"])
+tab_cliente, tab_subrubro = st.tabs(["🔎 Por cliente (Punto 1 + 2 + 4 PRO)", "🧭 Por subrubro (Punto 3)"])
 
 
 # -----------------------------
-# TAB CLIENTE (Punto 1 + 2 + 4)
+# TAB CLIENTE
 # -----------------------------
 with tab_cliente:
     st.subheader("Buscar cliente")
 
-    # Construir “etiqueta” cliente con posibles IDs/CUIT
     base = df[["cliente"]].drop_duplicates().copy()
     if "cliente_id" in df.columns:
         base = base.merge(df[["cliente", "cliente_id"]].drop_duplicates(), on="cliente", how="left")
@@ -287,16 +408,19 @@ with tab_cliente:
 
     def make_label(r):
         parts = [str(r["cliente"]).strip()]
-        if str(r.get("cliente_id", "")).strip():
+        if str(r.get("cliente_id", "")).strip() and str(r.get("cliente_id", "")).lower() != "nan":
             parts.append(f"ID {str(r['cliente_id']).strip()}")
-        if str(r.get("cuit", "")).strip() and str(r.get("cuit", "")).strip().lower() != "nan":
+        if str(r.get("cuit", "")).strip() and str(r.get("cuit", "")).lower() != "nan":
             parts.append(f"CUIT {str(r['cuit']).strip()}")
         return " | ".join(parts)
 
     base["label"] = base.apply(make_label, axis=1)
 
-    # BUSCADOR (Punto 1)
-    q = st.text_input("Buscar por Razón Social / Código Cliente / CUIT", value="", placeholder="Ej: fridman, 167, 20-211...")
+    q = st.text_input(
+        "Buscar por Razón Social / Código Cliente / CUIT",
+        value="",
+        placeholder="Ej: fridman, 167, 20-211...",
+    )
     q_norm = q.strip().lower()
 
     if q_norm:
@@ -308,17 +432,13 @@ with tab_cliente:
         options = base["label"].tolist()
 
     selected_label = st.selectbox("Seleccioná un cliente", options=options, index=0 if options else None)
-
     if not selected_label:
         st.stop()
 
-    # Resolver cliente real desde label
     selected_cliente = selected_label.split("|")[0].strip()
 
-    # Paneles
     left, right = st.columns([1.1, 0.9], gap="large")
 
-    # Tabla subrubros cliente
     with left:
         st.markdown("### 📦 Subrubros que compra")
         sub = (
@@ -332,144 +452,113 @@ with tab_cliente:
             .sort_values("importe", ascending=False)
         )
 
-        # Formateo amigable
         sub_show = sub.copy()
         sub_show["importe"] = sub_show["importe"].map(fmt_money)
         sub_show["unidades"] = sub_show["unidades"].round(0).astype(int)
         sub_show["cant_pedidos"] = sub_show["cant_pedidos"].round(0).astype(int)
         sub_show = sub_show.rename(columns={"cant_pedidos": "pedidos"})
-
         st.dataframe(sub_show, use_container_width=True, height=420)
 
-    # Sugerencias + Productos (Punto 2) + Plan de acción (Punto 4)
     with right:
         st.markdown("### 💡 Sugerencias de Venta Cruzada (Top 10) + Productos (Punto 2)")
-
         rank_metric = st.radio(
-            "¿Cómo querés rankear los productos dentro de cada subrubro?",
+            "¿Cómo querés rankear?",
             ["importe", "unidades", "pedidos"],
             index=0,
             horizontal=True,
         )
         top_subrubros = st.slider("Cantidad de subrubros oportunidad", min_value=3, max_value=25, value=10, step=1)
-        top_products = st.slider("Productos por subrubro", min_value=3, max_value=20, value=10, step=1)
 
         rec = recommend_for_client(selected_cliente, pivot, co, freq, topk=top_subrubros)
-
         rec_show = rec.copy()
-        # score puede ser grande: mantener numérico
         rec_show["score_cooc"] = rec_show["score_cooc"].fillna(0).astype(int)
         rec_show["freq_global"] = rec_show["freq_global"].fillna(0).astype(int)
-
         st.dataframe(rec_show.rename(columns={"score_cooc": "score_similitud"}), use_container_width=True, height=260)
 
-        # -----------------------------
-        # PUNTO 4: Plan de acción por subrubro recomendado
-        # -----------------------------
-        st.markdown("### 🧠 Plan de acción (Punto 4)")
-        st.caption("Sin venta por operación, armamos el plan con **ranking por importe/unidades/pedidos** y (si existe) **anio_mes** como “último mes / tendencia”.")
+        st.markdown("### 🧠 Plan de acción (Punto 4 PRO)")
 
-        if not has_products:
-            st.info("Para el Punto 4 necesito columnas de producto (articulo_descripcion y/o articulo_codigo). En tu CSV no aparecen.")
-        else:
-            metric_col = metric_col_name(rank_metric)
+        source_mode = st.radio(
+            "Fuente de productos sugeridos",
+            ["Clientes similares (recomendado)", "Global (más vendidos)"],
+            index=0,
+            horizontal=False,
+        )
 
-            # Data base solo del cliente, para sacar “último mes” si existe
-            df_cliente = df[df["cliente"] == selected_cliente].copy()
+        top_products = st.slider("Productos por subrubro", min_value=3, max_value=30, value=10, step=1)
 
-            # Si hay anio_mes, limpiar a algo comparable (YYYYMM)
-            has_period = "anio_mes" in df.columns
+        neighbors_n = st.slider("Cantidad de clientes similares a mirar", min_value=10, max_value=200, value=50, step=10)
+        exclude_bought = st.checkbox("Excluir productos que el cliente ya compra en ese subrubro", value=True)
 
-            def normalize_period(s: str) -> str:
-                s = (s or "").strip()
-                # acepta YYYY-MM, YYYY/MM, YYYYMM
-                s = s.replace("/", "-")
-                m = re.match(r"^(\d{4})-(\d{1,2})$", s)
-                if m:
-                    y, mo = m.group(1), int(m.group(2))
-                    return f"{y}{mo:02d}"
-                m2 = re.match(r"^(\d{6})$", s)
-                if m2:
-                    return s
-                # fallback: solo dígitos
-                digs = re.sub(r"\D", "", s)
-                if len(digs) == 6:
-                    return digs
-                return s
+        st.caption(
+            "Tip: “Clientes similares” suele dar mejores sugerencias porque replica canastas reales parecidas al cliente objetivo."
+        )
 
-            if has_period:
-                df_cliente["anio_mes_norm"] = df_cliente["anio_mes"].map(normalize_period)
-                df["anio_mes_norm"] = df["anio_mes"].map(normalize_period)
+        for _, row in rec.head(top_subrubros).iterrows():
+            sr = row["subrubro"]
+            score = int(row["score_cooc"]) if pd.notna(row["score_cooc"]) else 0
 
-            # Para cada subrubro recomendado, sugerir productos top
-            for _, row in rec.head(top_subrubros).iterrows():
-                sr = row["subrubro"]
-                score = int(row["score_cooc"]) if pd.notna(row["score_cooc"]) else 0
-
-                with st.expander(f"📌 {sr}  — score {score}", expanded=False):
-                    cols_group = ["subrubro"]
-                    if "articulo_codigo" in df.columns:
-                        cols_group.append("articulo_codigo")
-                    if "articulo_descripcion" in df.columns:
-                        cols_group.append("articulo_descripcion")
-
-                    dfx = df[df["subrubro"] == sr].copy()
-
-                    # Agregado por producto
-                    g = (
-                        dfx.groupby(cols_group, as_index=False)
-                        .agg(
-                            importe=("importe", "sum"),
-                            unidades=("unidades", "sum"),
-                            pedidos=("cant_pedidos", "sum"),
-                        )
-                        .sort_values(metric_col, ascending=False)
-                        .head(top_products)
+            with st.expander(f"📌 {sr} — score {score}", expanded=False):
+                if source_mode.startswith("Clientes similares"):
+                    g = top_products_similar_clients(
+                        df=df,
+                        selected_cliente=selected_cliente,
+                        subrubro=sr,
+                        rank_metric=rank_metric,
+                        topn=top_products,
+                        pivot=pivot,
+                        X_bin=X_bin,
+                        norms=norms,
+                        clients=clients,
+                        has_period=has_period,
+                        neighbors_n=neighbors_n,
+                        exclude_already_bought=exclude_bought,
                     )
 
-                    # Si hay periodo, sumar "ultimo_mes"
-                    if has_period and "anio_mes_norm" in dfx.columns:
-                        last = (
-                            dfx.groupby(cols_group, as_index=False)["anio_mes_norm"]
-                            .max()
-                            .rename(columns={"anio_mes_norm": "ultimo_mes"})
-                        )
-                        g = g.merge(last, on=cols_group, how="left")
+                    # formateo
+                    show = g.copy()
+                    if "importe" in show.columns:
+                        show["importe"] = show["importe"].map(fmt_money)
+                    show["unidades"] = show["unidades"].round(0).astype(int)
+                    show["pedidos"] = show["pedidos"].round(0).astype(int)
+                    if "score" in show.columns:
+                        show["score"] = show["score"].round(2)
 
-                    # Formateo
-                    g_show = g.copy()
-                    if "importe" in g_show.columns:
-                        g_show["importe"] = g_show["importe"].map(fmt_money)
-                    g_show["unidades"] = g_show["unidades"].round(0).astype(int)
-                    g_show["pedidos"] = g_show["pedidos"].round(0).astype(int)
+                    cols = ["articulo_codigo", "articulo_descripcion", "score", "vecinos", "importe", "unidades", "pedidos"]
+                    if has_period and "ultimo_mes" in show.columns:
+                        cols.append("ultimo_mes")
 
-                    # Orden columnas lindo
-                    ordered = []
-                    if "articulo_codigo" in g_show.columns:
-                        ordered.append("articulo_codigo")
-                    if "articulo_descripcion" in g_show.columns:
-                        ordered.append("articulo_descripcion")
-                    ordered += ["importe", "unidades", "pedidos"]
-                    if "ultimo_mes" in g_show.columns:
-                        ordered.append("ultimo_mes")
+                    st.dataframe(show[cols], use_container_width=True, height=280)
 
-                    st.dataframe(g_show[ordered], use_container_width=True, height=260)
+                else:
+                    g = top_products_global(df=df, subrubro=sr, rank_metric=rank_metric, topn=top_products, has_period=has_period)
 
-                    # Mini insight de tendencia (si existe anio_mes)
-                    if has_period:
-                        st.caption("📈 Tendencia mensual (subrubro recomendado)")
-                        by_m = (
-                            dfx.groupby("anio_mes_norm", as_index=False)
-                            .agg(importe=("importe", "sum"), unidades=("unidades", "sum"), pedidos=("cant_pedidos", "sum"))
-                            .sort_values("anio_mes_norm", ascending=True)
-                            .tail(12)
-                        )
-                        by_m_show = by_m.copy()
-                        by_m_show["importe"] = by_m_show["importe"].map(fmt_money)
-                        by_m_show["unidades"] = by_m_show["unidades"].round(0).astype(int)
-                        by_m_show["pedidos"] = by_m_show["pedidos"].round(0).astype(int)
-                        by_m_show = by_m_show.rename(columns={"anio_mes_norm": "anio_mes"})
-                        st.dataframe(by_m_show, use_container_width=True, height=220)
+                    show = g.copy()
+                    show["importe"] = show["importe"].map(fmt_money)
+                    show["unidades"] = show["unidades"].round(0).astype(int)
+                    show["pedidos"] = show["pedidos"].round(0).astype(int)
+
+                    cols = ["articulo_codigo", "articulo_descripcion", "importe", "unidades", "pedidos"]
+                    if has_period and "ultimo_mes" in show.columns:
+                        cols.append("ultimo_mes")
+
+                    st.dataframe(show[cols], use_container_width=True, height=280)
+
+                # mini tendencia mensual del subrubro (si hay periodo)
+                if has_period and "anio_mes_norm" in df.columns:
+                    dfx_sr = df[df["subrubro"] == sr].copy()
+                    by_m = (
+                        dfx_sr.groupby("anio_mes_norm", as_index=False)
+                        .agg(importe=("importe", "sum"), unidades=("unidades", "sum"), pedidos=("cant_pedidos", "sum"))
+                        .sort_values("anio_mes_norm", ascending=True)
+                        .tail(12)
+                    )
+                    by_m_show = by_m.copy()
+                    by_m_show["importe"] = by_m_show["importe"].map(fmt_money)
+                    by_m_show["unidades"] = by_m_show["unidades"].round(0).astype(int)
+                    by_m_show["pedidos"] = by_m_show["pedidos"].round(0).astype(int)
+                    by_m_show = by_m_show.rename(columns={"anio_mes_norm": "anio_mes"})
+                    st.caption("📈 Tendencia mensual del subrubro (últimos 12 meses)")
+                    st.dataframe(by_m_show, use_container_width=True, height=210)
 
 
 # -----------------------------
