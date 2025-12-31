@@ -1,15 +1,15 @@
-import io
 import re
 import unicodedata
-from collections import defaultdict
+from difflib import get_close_matches
+from itertools import combinations
 
 import pandas as pd
 import streamlit as st
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# =========================
+# Helpers (normalización)
+# =========================
 def _normalize(s: str) -> str:
     if s is None:
         return ""
@@ -18,29 +18,66 @@ def _normalize(s: str) -> str:
     s = "".join([c for c in s if not unicodedata.combining(c)])
     s = s.lower()
     s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"[^a-z0-9_ ]", "", s)
     return s
 
 
-def read_csv_with_fallback(uploaded_file) -> pd.DataFrame:
+def _pick_column(df: pd.DataFrame, desired: str, aliases: list[str]) -> str | None:
     """
-    Streamlit uploader entrega un file-like. Leemos bytes y probamos encodings típicos de Excel/Windows.
+    Intenta encontrar una columna que matchee desired/aliases
+    usando normalización y fuzzy match.
     """
-    raw = uploaded_file.getvalue()
-    encodings_to_try = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+    cols = list(df.columns)
+    norm_map = {_normalize(c): c for c in cols}
 
+    # match exacto por desired o alias
+    candidates = [desired] + aliases
+    for cand in candidates:
+        n = _normalize(cand)
+        if n in norm_map:
+            return norm_map[n]
+
+    # fuzzy match
+    desired_norms = [_normalize(c) for c in candidates]
+    best = None
+    best_score = 0.0
+    for col in cols:
+        coln = _normalize(col)
+        # busca parecido contra todos los desired_norms
+        matches = get_close_matches(coln, desired_norms, n=1, cutoff=0.75)
+        if matches:
+            # score aprox: longitud match / longitud col
+            score = min(1.0, len(matches[0]) / max(1, len(coln)))
+            if score > best_score:
+                best_score = score
+                best = col
+    return best
+
+
+def _safe_read_csv(uploaded_file) -> pd.DataFrame:
+    """
+    Lee CSV con fallback de encoding y separador.
+    """
+    # en Streamlit, uploaded_file es BytesIO-like
+    # probamos encodings comunes en Argentina/Excel
+    encodings = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
     last_err = None
-    for enc in encodings_to_try:
+
+    for enc in encodings:
         try:
-            bio = io.BytesIO(raw)
-            df = pd.read_csv(
-                bio,
-                sep=",",
-                encoding=enc,
-                dtype=str,              # primero todo texto para evitar errores
-                on_bad_lines="skip",    # por si hay alguna línea rota
-                engine="python",
-            )
-            df.attrs["detected_encoding"] = enc
+            uploaded_file.seek(0)
+            # sep=None + engine python detecta delimitador,
+            # pero como vos confirmaste coma, lo fijamos en ",".
+            df = pd.read_csv(uploaded_file, sep=",", encoding=enc, low_memory=False)
+            return df
+        except Exception as e:
+            last_err = e
+
+    # último intento: autodetect delimiter
+    for enc in encodings:
+        try:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding=enc, low_memory=False)
             return df
         except Exception as e:
             last_err = e
@@ -48,248 +85,295 @@ def read_csv_with_fallback(uploaded_file) -> pd.DataFrame:
     raise last_err
 
 
-def cooccurrence_rules_by_client(df: pd.DataFrame, col_client: str, col_subrubro: str):
+# =========================
+# Lógica cross-sell
+# =========================
+@st.cache_data(show_spinner=False)
+def build_rules(df: pd.DataFrame, cliente_col: str, subrubro_col: str, weight_col: str | None):
     """
-    Devuelve:
-      - rules[(a,b)] = cantidad de clientes que compraron ambos subrubros a y b
-      - support[a]   = cantidad de clientes que compraron el subrubro a
+    Construye reglas simples de co-ocurrencia por cliente:
+    - Para cada cliente: set subrubros comprados
+    - Para cada par (A,B): cuenta co-ocurrencia
+    Retorna:
+      client_subrubros: dict[cliente -> set(subrubros)]
+      pair_counts: dict[(A,B)->count]
+      subrubro_popularity: Series subrubro -> score (unidades/importe/cant_pedidos o 1)
     """
-    client_to_subs = defaultdict(set)
+    d = df[[cliente_col, subrubro_col]].copy()
+    d[cliente_col] = d[cliente_col].astype(str)
 
-    for _, row in df[[col_client, col_subrubro]].dropna().iterrows():
-        c = str(row[col_client]).strip()
-        s = str(row[col_subrubro]).strip()
-        if c and s:
-            client_to_subs[c].add(s)
+    # limpieza básica
+    d[subrubro_col] = d[subrubro_col].astype(str).str.strip()
+    d = d[(d[subrubro_col] != "") & (d[subrubro_col].notna())]
 
-    support = defaultdict(int)
-    pair_count = defaultdict(int)
+    # Popularidad (para ordenar sugerencias)
+    if weight_col and weight_col in df.columns:
+        pop = df.groupby(subrubro_col)[weight_col].sum().sort_values(ascending=False)
+    else:
+        pop = df.groupby(subrubro_col).size().sort_values(ascending=False)
 
-    for c, subs in client_to_subs.items():
-        subs = sorted(subs)
-        for a in subs:
-            support[a] += 1
-        # pares
-        for i in range(len(subs)):
-            for j in range(i + 1, len(subs)):
-                pair_count[(subs[i], subs[j])] += 1
+    # Subrubros por cliente
+    grp = d.groupby(cliente_col)[subrubro_col].apply(lambda x: set(x.unique()))
+    client_subrubros = grp.to_dict()
 
-    # para consulta fácil en ambos sentidos
-    rules = defaultdict(int)
-    for (a, b), cnt in pair_count.items():
-        rules[(a, b)] = cnt
-        rules[(b, a)] = cnt
+    # Co-ocurrencia por pares
+    pair_counts = {}
+    for _, subs in client_subrubros.items():
+        if len(subs) < 2:
+            continue
+        for a, b in combinations(sorted(subs), 2):
+            pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
 
-    return rules, support, client_to_subs
-
-
-def safe_to_numeric(series: pd.Series) -> pd.Series:
-    # Convierte "1.234,56" o "1234,56" o "1234.56" a float de forma robusta
-    s = series.fillna("").astype(str).str.strip()
-    s = s.str.replace(" ", "", regex=False)
-    # si viene estilo AR: miles con punto y decimales con coma
-    # sacamos miles y pasamos coma a punto
-    s = s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
-    return pd.to_numeric(s, errors="coerce")
+    return client_subrubros, pair_counts, pop
 
 
-# -----------------------------
+def suggest_cross_sell_for_client(
+    cliente_key: str,
+    client_subrubros: dict,
+    pair_counts: dict,
+    popularity: pd.Series,
+    top_n: int = 10,
+):
+    """
+    Dado un cliente, recomienda subrubros NO comprados, usando:
+      score = suma co-ocurrencias con los subrubros que sí compra
+      desempate por popularidad global
+    """
+    bought = client_subrubros.get(cliente_key, set())
+    if not bought:
+        return pd.DataFrame(columns=["subrubro_sugerido", "score_coocurrencia", "popularidad_global"])
+
+    scores = {}
+    for (a, b), c in pair_counts.items():
+        if a in bought and b not in bought:
+            scores[b] = scores.get(b, 0) + c
+        elif b in bought and a not in bought:
+            scores[a] = scores.get(a, 0) + c
+
+    if not scores:
+        return pd.DataFrame(columns=["subrubro_sugerido", "score_coocurrencia", "popularidad_global"])
+
+    rows = []
+    for sub, sc in scores.items():
+        pop = float(popularity.get(sub, 0))
+        rows.append((sub, sc, pop))
+
+    out = pd.DataFrame(rows, columns=["subrubro_sugerido", "score_coocurrencia", "popularidad_global"])
+    out = out.sort_values(["score_coocurrencia", "popularidad_global"], ascending=[False, False]).head(top_n)
+    return out
+
+
+# =========================
 # UI
-# -----------------------------
+# =========================
 st.set_page_config(page_title="Detector de Canastas Llenas", layout="wide")
 
 st.title("🧺 Detector de Canastas Llenas")
-st.caption("Prototipo de cross-selling por **frecuencia de co-ocurrencia** de subrubros (por cliente).")
+st.caption("Prototipo de cross-selling por frecuencia / co-ocurrencia de subrubros (por cliente).")
 
 with st.sidebar:
     st.header("Datos")
-    st.write("Subí un CSV (coma `,`). Si el archivo viene de Excel, puede estar en cp1252/latin1: esta app lo detecta.")
+    st.write("Subí tu CSV de ventas (separado por coma).")
     uploaded = st.file_uploader("Subí tu archivo", type=["csv"])
+    top_n = st.slider("Cantidad de sugerencias (Top N)", 5, 30, 10, 1)
 
-    st.divider()
-    st.header("Parámetros")
-    top_k = st.number_input("Cantidad de sugerencias", min_value=1, max_value=20, value=5, step=1)
-    min_support = st.number_input("Mínimo clientes (support) para sugerir un subrubro", min_value=1, max_value=5000, value=5, step=1)
-
-
-# -----------------------------
-# Load Data
-# -----------------------------
+# Si no hay archivo, no seguimos
 if not uploaded:
-    st.info("Subí un CSV para empezar.")
+    st.info("Subí un CSV para comenzar.")
     st.stop()
 
+# Cargar CSV robusto
 try:
-    df_raw = read_csv_with_fallback(uploaded)
-    detected = df_raw.attrs.get("detected_encoding", "desconocido")
+    df = _safe_read_csv(uploaded)
 except Exception as e:
-    st.error("No pude leer el CSV. Probá guardarlo como **CSV UTF-8** desde Excel y re-subilo.")
+    st.error("No pude leer el CSV. Probá guardarlo como CSV UTF-8 desde Excel.")
     st.exception(e)
     st.stop()
 
-# Normalizamos nombres de columnas (por si vienen con espacios raros)
-df = df_raw.copy()
-df.columns = [str(c).strip() for c in df.columns]
+# Detectar columnas necesarias
+col_cliente_id = _pick_column(df, "cliente_id", ["cliente", "codigo_cliente", "cliente_codigo", "id_cliente"])
+col_cuit = _pick_column(df, "cuit", ["cuil", "tax_id"])
+col_razon = _pick_column(df, "RazonSocial", ["razon_social", "razon", "cliente_nombre", "nombre_cliente"])
+col_subrubro = _pick_column(df, "subrubro", ["articulo_sub_rubro", "sub_rubro", "sub rubro", "subrubro_nombre"])
+col_unidades = _pick_column(df, "unidades", ["cantidad", "qty"])
+col_importe = _pick_column(df, "importe", ["importe $", "monto", "total", "importe_pesos"])
+col_cant_pedidos = _pick_column(df, "cant_pedidos", ["cantidad_pedidos", "n_pedidos", "cant pedidos", "pedidos"])
 
-required = [
-    "empresa", "anio_mes", "cliente_id", "cuit", "RazonSocial", "localidad", "vendedor", "zona_comercial",
-    "subrubro", "articulo_codigo", "articulo_descripcion", "unidades", "importe", "cant_pedidos"
-]
-missing = [c for c in required if c not in df.columns]
+required = {
+    "cliente_id": col_cliente_id,
+    "RazonSocial": col_razon,
+    "subrubro": col_subrubro,
+}
+missing = [k for k, v in required.items() if v is None]
 
 if missing:
-    st.error("Faltan columnas requeridas en tu CSV:")
-    st.write(missing)
-    st.write("Columnas encontradas:")
-    st.write(list(df.columns))
+    st.error("Faltan columnas necesarias en tu archivo.")
+    st.write("Necesito al menos: **cliente_id**, **RazonSocial**, **subrubro**.")
+    st.write("Columnas encontradas:", list(df.columns))
+    st.write("No encontré:", missing)
     st.stop()
 
-# Cast / limpieza básica
+# Renombrar a estándar para trabajar cómodo
+rename_map = {}
+if col_cliente_id: rename_map[col_cliente_id] = "cliente_id"
+if col_cuit: rename_map[col_cuit] = "cuit"
+if col_razon: rename_map[col_razon] = "RazonSocial"
+if col_subrubro: rename_map[col_subrubro] = "subrubro"
+if col_unidades: rename_map[col_unidades] = "unidades"
+if col_importe: rename_map[col_importe] = "importe"
+if col_cant_pedidos: rename_map[col_cant_pedidos] = "cant_pedidos"
+
+df = df.rename(columns=rename_map)
+
+# Normalización mínima de tipos
 df["cliente_id"] = df["cliente_id"].astype(str).str.strip()
 df["RazonSocial"] = df["RazonSocial"].astype(str).str.strip()
 df["subrubro"] = df["subrubro"].astype(str).str.strip()
 
-df["unidades_num"] = safe_to_numeric(df["unidades"])
-df["importe_num"] = safe_to_numeric(df["importe"])
-df["cant_pedidos_num"] = safe_to_numeric(df["cant_pedidos"])
+if "cuit" in df.columns:
+    df["cuit"] = df["cuit"].astype(str).str.strip()
 
-# KPIs
-c1, c2, c3, c4 = st.columns(4)
+for num_col in ["unidades", "importe", "cant_pedidos"]:
+    if num_col in df.columns:
+        df[num_col] = pd.to_numeric(df[num_col], errors="coerce").fillna(0)
+
+# Métricas arriba
+c1, c2, c3 = st.columns(3)
 c1.metric("Filas", f"{len(df):,}".replace(",", "."))
 c2.metric("Clientes", f"{df['cliente_id'].nunique():,}".replace(",", "."))
 c3.metric("Subrubros", f"{df['subrubro'].nunique():,}".replace(",", "."))
-c4.metric("Encoding leído", detected)
 
 st.divider()
 
-# Precompute co-ocurrencias
-with st.spinner("Calculando co-ocurrencias de subrubros por cliente..."):
-    rules, support, client_to_subs = cooccurrence_rules_by_client(df, "cliente_id", "subrubro")
+# =========================
+# ✅ MEJORA #1: Buscador de cliente (por id/cuit/razón)
+# =========================
+st.subheader("Buscar cliente")
 
-# Selector modo búsqueda
-col_left, col_right = st.columns([1, 2])
+# pre-armamos una tabla única de clientes (más liviana)
+clientes_cols = ["cliente_id", "RazonSocial"]
+if "cuit" in df.columns:
+    clientes_cols.append("cuit")
 
-with col_left:
-    st.subheader("Buscar por")
-    mode = st.radio("", ["Cliente", "Subrubro"], horizontal=False)
+df_clientes = df[clientes_cols].drop_duplicates().copy()
+df_clientes["RazonSocial_norm"] = df_clientes["RazonSocial"].map(_normalize)
+df_clientes["cliente_id_norm"] = df_clientes["cliente_id"].map(_normalize)
+if "cuit" in df_clientes.columns:
+    df_clientes["cuit_norm"] = df_clientes["cuit"].map(_normalize)
 
-with col_right:
-    if mode == "Cliente":
-        st.subheader("Buscar por cliente")
+busqueda = st.text_input(
+    "Buscar por Razón Social / Código Cliente / CUIT",
+    value="",
+    placeholder="Ej: 000002  |  3069...  |  A Y B Repuestos",
+)
 
-        # lista de clientes con label
-        clients = (
-            df[["cliente_id", "RazonSocial"]]
-            .drop_duplicates()
-            .assign(label=lambda x: x["cliente_id"].astype(str) + " — " + x["RazonSocial"].astype(str))
-            .sort_values("label")
-        )
-
-        selected = st.selectbox("Cliente (podés tipear razón social)", options=clients["label"].tolist())
-        sel_id = selected.split(" — ")[0].strip()
-
-        # subrubros del cliente
-        subs = sorted(list(client_to_subs.get(sel_id, set())))
-        if not subs:
-            st.warning("Este cliente no tiene subrubros asociados (o quedó vacío tras limpieza).")
-            st.stop()
-
-        s1, s2 = st.columns(2)
-
-        with s1:
-            st.markdown("### 🧾 Subrubros que compra")
-            # tabla por ranking de importe / unidades
-            tmp = (
-                df[df["cliente_id"] == sel_id]
-                .groupby("subrubro", as_index=False)
-                .agg(
-                    importe=("importe_num", "sum"),
-                    unidades=("unidades_num", "sum"),
-                    pedidos=("cant_pedidos_num", "sum"),
-                )
-                .sort_values(["importe", "pedidos", "unidades"], ascending=False)
-            )
-            st.dataframe(tmp, use_container_width=True, height=360)
-
-        with s2:
-            st.markdown(f"### 💡 Sugerencias de Venta Cruzada (Top {top_k})")
-
-            # score: sum co-ocurrencia con subrubros comprados
-            scores = defaultdict(int)
-            for a in subs:
-                for b in support.keys():
-                    if b == a:
-                        continue
-                    scores[b] += rules.get((a, b), 0)
-
-            # sacamos los que ya compra
-            for a in subs:
-                scores.pop(a, None)
-
-            # filtramos por support mínimo
-            candidates = []
-            for b, sc in scores.items():
-                if support.get(b, 0) >= int(min_support) and sc > 0:
-                    candidates.append((b, sc, support.get(b, 0)))
-
-            candidates.sort(key=lambda x: (x[1], x[2]), reverse=True)
-            top = candidates[: int(top_k)]
-
-            if not top:
-                st.info("No hay sugerencias con los filtros actuales. Probá bajar el mínimo de support.")
-            else:
-                out = pd.DataFrame(top, columns=["Subrubro sugerido", "Score co-ocurrencia", "Clientes que lo compran"])
-                st.dataframe(out, use_container_width=True, height=360)
-
-                # bonus: mostrar artículos más comprados de esos subrubros (para proponer)
-                st.markdown("#### 🧩 Artículos top dentro de los subrubros sugeridos")
-                suggested_subs = [x[0] for x in top]
-                art = (
-                    df[df["subrubro"].isin(suggested_subs)]
-                    .groupby(["subrubro", "articulo_codigo", "articulo_descripcion"], as_index=False)
-                    .agg(
-                        importe=("importe_num", "sum"),
-                        unidades=("unidades_num", "sum"),
-                        pedidos=("cant_pedidos_num", "sum"),
-                    )
-                    .sort_values(["subrubro", "importe", "pedidos"], ascending=[True, False, False])
-                )
-                # top 5 por subrubro
-                art["rank"] = art.groupby("subrubro")["importe"].rank(method="first", ascending=False)
-                art = art[art["rank"] <= 5].drop(columns=["rank"])
-                st.dataframe(art, use_container_width=True, height=360)
-
+# Filtrado dinámico (si no escribe nada, mostramos top 200 por frecuencia)
+if busqueda.strip():
+    b = _normalize(busqueda)
+    mask = df_clientes["RazonSocial_norm"].str.contains(b, na=False) | df_clientes["cliente_id_norm"].str.contains(b, na=False)
+    if "cuit_norm" in df_clientes.columns:
+        mask = mask | df_clientes["cuit_norm"].str.contains(b, na=False)
+    opciones = df_clientes[mask].copy()
+else:
+    # top clientes por cant_pedidos (si existe) o por unidades/importe
+    if "cant_pedidos" in df.columns:
+        top = df.groupby(["cliente_id", "RazonSocial"])["cant_pedidos"].sum().sort_values(ascending=False).head(200).reset_index()
+    elif "unidades" in df.columns:
+        top = df.groupby(["cliente_id", "RazonSocial"])["unidades"].sum().sort_values(ascending=False).head(200).reset_index()
+    elif "importe" in df.columns:
+        top = df.groupby(["cliente_id", "RazonSocial"])["importe"].sum().sort_values(ascending=False).head(200).reset_index()
     else:
-        st.subheader("Buscar por subrubro")
-        subs_all = sorted(df["subrubro"].dropna().unique().tolist())
-        sel_sub = st.selectbox("Subrubro", options=subs_all)
+        top = df_clientes.head(200)
 
-        # clientes que compran ese subrubro
-        buyers = df[df["subrubro"] == sel_sub]["cliente_id"].unique().tolist()
+    opciones = top.merge(df_clientes, on=["cliente_id", "RazonSocial"], how="left")
 
-        st.markdown("### 💡 Cross-sell sugerido para este subrubro")
-        # sugerimos subrubros que co-ocurren con este
-        cand = []
-        for b in support.keys():
-            if b == sel_sub:
-                continue
-            sc = rules.get((sel_sub, b), 0)
-            if sc > 0 and support.get(b, 0) >= int(min_support):
-                cand.append((b, sc, support.get(b, 0)))
+# armamos label lindo
+def _label(row):
+    if "cuit" in row and pd.notna(row["cuit"]) and str(row["cuit"]).strip() != "":
+        return f"{row['RazonSocial']}  |  ID {row['cliente_id']}  |  CUIT {row['cuit']}"
+    return f"{row['RazonSocial']}  |  ID {row['cliente_id']}"
 
-        cand.sort(key=lambda x: (x[1], x[2]), reverse=True)
-        top = cand[: int(top_k)]
+if len(opciones) == 0:
+    st.warning("No encontré clientes con esa búsqueda. Probá con menos letras o con el código.")
+    st.stop()
 
-        if not top:
-            st.info("No hay sugerencias con los filtros actuales. Probá bajar el mínimo de support.")
-        else:
-            out = pd.DataFrame(top, columns=["Subrubro sugerido", "Clientes en común", "Clientes que lo compran"])
-            st.dataframe(out, use_container_width=True, height=320)
+opciones = opciones.drop_duplicates(subset=["cliente_id", "RazonSocial"]).copy()
+opciones["label"] = opciones.apply(_label, axis=1)
 
-        st.markdown("### 🧾 Clientes que compran este subrubro (muestra)")
-        sample = (
-            df[df["subrubro"] == sel_sub][["cliente_id", "RazonSocial", "localidad", "zona_comercial", "vendedor"]]
-            .drop_duplicates()
-            .head(200)
-        )
-        st.dataframe(sample, use_container_width=True, height=360)
+cliente_label = st.selectbox(
+    "Seleccioná un cliente",
+    opciones["label"].tolist(),
+    index=0,
+)
+
+# obtenemos cliente_id seleccionado
+row_sel = opciones[opciones["label"] == cliente_label].iloc[0]
+cliente_id_seleccionado = str(row_sel["cliente_id"])
+
+st.caption(f"Cliente seleccionado: **{row_sel['RazonSocial']}** (ID: **{cliente_id_seleccionado}**)")
+
+st.divider()
+
+# =========================
+# Filtrado por cliente
+# =========================
+df_cliente = df[df["cliente_id"] == cliente_id_seleccionado].copy()
+
+# Elegimos weight para popularidad y co-ocurrencia (cant_pedidos > unidades > importe)
+weight = None
+if "cant_pedidos" in df.columns:
+    weight = "cant_pedidos"
+elif "unidades" in df.columns:
+    weight = "unidades"
+elif "importe" in df.columns:
+    weight = "importe"
+
+with st.spinner("Calculando reglas de cross-sell..."):
+    client_subrubros, pair_counts, popularity = build_rules(df, "cliente_id", "subrubro", weight)
+
+# =========================
+# Subrubros que compra
+# =========================
+st.header("📦 Subrubros que compra")
+
+agg_cols = []
+if "cant_pedidos" in df_cliente.columns:
+    agg_cols.append(("cant_pedidos", "sum"))
+if "unidades" in df_cliente.columns:
+    agg_cols.append(("unidades", "sum"))
+if "importe" in df_cliente.columns:
+    agg_cols.append(("importe", "sum"))
+
+if agg_cols:
+    grouped = df_cliente.groupby("subrubro").agg(**{k: (k, fn) for k, fn in agg_cols}).reset_index()
+    # ordenar por la mejor métrica disponible
+    if "cant_pedidos" in grouped.columns:
+        grouped = grouped.sort_values("cant_pedidos", ascending=False)
+    elif "unidades" in grouped.columns:
+        grouped = grouped.sort_values("unidades", ascending=False)
+    elif "importe" in grouped.columns:
+        grouped = grouped.sort_values("importe", ascending=False)
+
+    st.dataframe(grouped, use_container_width=True, height=340)
+else:
+    st.dataframe(df_cliente[["subrubro"]].drop_duplicates(), use_container_width=True)
+
+# =========================
+# Sugerencias de Cross-Sell
+# =========================
+st.header("💡 Sugerencias de Cross-Sell (subrubros)")
+
+sug = suggest_cross_sell_for_client(
+    cliente_key=cliente_id_seleccionado,
+    client_subrubros=client_subrubros,
+    pair_counts=pair_counts,
+    popularity=popularity,
+    top_n=top_n,
+)
+
+if sug.empty:
+    st.info("No encontré sugerencias (puede pasar si el cliente compra muy pocos subrubros o no hay co-ocurrencia).")
+else:
+    st.dataframe(sug, use_container_width=True, height=300)
+
+st.caption("Siguiente mejora (cuando me digas): resultados con *quick wins*, filtros por zona/vendedor y sugerencias de productos top dentro de cada subrubro.")
