@@ -2,7 +2,7 @@
 
 [build]
   # Comando para build de producción
-  command = "npm run build"
+  command = "npm install && npm run build"
 
   # Directorio donde se genera el build
   publish = "dist"
@@ -10,6 +10,7 @@
   # Variables de entorno para el build
   [build.environment]
     NODE_VERSION = "18"
+    NPM_FLAGS = "--legacy-peer-deps"
 
 # Configuración de redirects para SPA (React Router)
 [[redirects]]
