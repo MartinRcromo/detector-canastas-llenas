@@ -23,9 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# Python
-app.py
-requirements.txt
+# Python (old legacy files - keeping api/ directory)
 __pycache__/
 *.py[cod]
 *$py.class
