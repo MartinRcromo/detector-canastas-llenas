@@ -68,3 +68,50 @@ async def root():
         },
         "docs": "/docs"
     }
+
+# Testing endpoints
+@app.get("/api/test/clientes")
+def test_list_clientes():
+    """Lista los primeros 20 clientes con más ventas"""
+    from database import execute_query
+
+    query = """
+        SELECT
+            cuit,
+            cliente,
+            COUNT(*) as cantidad_registros,
+            SUM(importe) as total_importe
+        FROM public.ventas
+        WHERE empresa IN ('CANASATA', 'SURTIHOGAR')
+        GROUP BY cuit, cliente
+        ORDER BY total_importe DESC
+        LIMIT 20
+    """
+
+    try:
+        result = execute_query(query)
+        return {
+            "total_clientes_encontrados": len(result),
+            "clientes": result
+        }
+    except Exception as e:
+        return {"error": str(e), "tipo": str(type(e))}
+
+@app.get("/api/test/estructura")
+def test_estructura_tabla():
+    """Muestra la estructura de la tabla ventas"""
+    from database import execute_query
+
+    query = """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        AND table_name = 'ventas'
+        ORDER BY ordinal_position
+    """
+
+    try:
+        result = execute_query(query)
+        return {"columnas": result}
+    except Exception as e:
+        return {"error": str(e)}
