@@ -8,7 +8,7 @@ API Backend FastAPI + SQLAlchemy + PostgreSQL para análisis de cross-selling B2
 - **SQLAlchemy** - ORM y conexión a PostgreSQL
 - **PostgreSQL** - Base de datos relacional (Supabase)
 - **Pydantic** - Validación de datos y modelos
-- **Python nativo** - Análisis de datos sin pandas (optimizado para Railway)
+- **Python nativo** - Análisis de datos optimizado (collections, defaultdict)
 
 ## 📋 Endpoints
 

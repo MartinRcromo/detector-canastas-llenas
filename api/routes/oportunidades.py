@@ -1,7 +1,7 @@
 """
 Endpoint para oportunidades de cross-selling
 GET /api/oportunidades/{cuit}
-VERSION SIMPLIFICADA SIN PANDAS
+Implementación optimizada con Python nativo y SQL
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta

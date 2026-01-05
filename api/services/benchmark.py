@@ -1,7 +1,7 @@
 """
 Servicio de benchmark y análisis de co-ocurrencia
 Identifica oportunidades de cross-selling basado en clientes similares
-VERSION SIMPLIFICADA SIN PANDAS
+Implementación optimizada con Python nativo y SQL
 """
 from datetime import datetime, timedelta
 from typing import List, Dict
