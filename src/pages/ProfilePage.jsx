@@ -1,35 +1,62 @@
 import React from 'react';
 import { DollarSign, Package, ShoppingBag, Layers, TrendingUp, Calendar } from 'lucide-react';
+import { useCliente } from '../context/ClienteContext';
+import { useApi } from '../hooks/useApi';
+import api from '../services/api';
 import MetricCard from '../components/MetricCard';
 import Card from '../components/Card';
 import Badge from '../components/Badge';
-import { formatCUIT } from '../utils/formatters';
-
-// DATOS MOCK HARDCODEADOS
-const MOCK_PROFILE = {
-  razon_social: 'DISTRIBUIDORA NORTE SA',
-  cuit: '20301234567',
-  cliente_id: '1001',
-  cluster: 'A1',
-  clasificacion: 'Activo Plus',
-  total_anual: 2_500_000,
-  total_unidades: 15000,
-  cant_pedidos: 120,
-  subrubros_activos: 8,
-  periodo_analisis: '2024-01',
-};
+import Loading from '../components/Loading';
+import ErrorMessage from '../components/ErrorMessage';
+import { formatCUIT, formatCurrency } from '../utils/formatters';
 
 const ProfilePage = () => {
+  const { cuit } = useCliente();
+  const { data: perfil, loading, error } = useApi(() => api.getPerfil(cuit), [cuit]);
+
   const getClassificationColor = (clasificacion) => {
     const colors = {
       'Estratégico Premium': 'bg-purple-100 text-purple-800 border-purple-300',
       'Estratégico': 'bg-blue-100 text-blue-800 border-blue-300',
       'Activo Plus': 'bg-green-100 text-green-800 border-green-300',
       'Activo': 'bg-teal-100 text-teal-800 border-teal-300',
-      'Desarrollo': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+      'En desarrollo': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+      'Nuevo': 'bg-gray-100 text-gray-800 border-gray-300',
     };
     return colors[clasificacion] || 'bg-gray-100 text-gray-800 border-gray-300';
   };
+
+  const getClassificationDescription = (clasificacion) => {
+    const descriptions = {
+      'Activo Plus': 'Cliente activo con excelente performance, facturación mayor a $3M anuales.',
+      'Activo': 'Cliente activo con buen potencial, facturación entre $1.5M y $3M anuales.',
+      'En desarrollo': 'Cliente en crecimiento, facturación entre $500K y $1.5M anuales.',
+      'Nuevo': 'Cliente nuevo con potencial de desarrollo.',
+    };
+    return descriptions[clasificacion] || 'Cliente del sistema.';
+  };
+
+  if (loading) {
+    return <Loading message="Cargando perfil del cliente..." />;
+  }
+
+  if (error) {
+    return (
+      <ErrorMessage
+        title="Error al cargar el perfil"
+        message={error}
+      />
+    );
+  }
+
+  if (!perfil) {
+    return null;
+  }
+
+  // Calcular ticket promedio
+  const ticketPromedio = perfil.cantidad_pedidos > 0
+    ? perfil.facturacion_anual / perfil.cantidad_pedidos
+    : 0;
 
   return (
     <div className="space-y-8">
@@ -38,22 +65,18 @@ const ProfilePage = () => {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-blue-industrial mb-2">
-              {MOCK_PROFILE.razon_social}
+              {perfil.nombre_empresa}
             </h1>
             <div className="flex flex-wrap gap-3 items-center text-sm text-gray-text">
-              <span>CUIT: {formatCUIT(MOCK_PROFILE.cuit)}</span>
-              <span className="text-gray-medium">•</span>
-              <span>ID: {MOCK_PROFILE.cliente_id}</span>
-              <span className="text-gray-medium">•</span>
-              <span>Cluster: {MOCK_PROFILE.cluster}</span>
+              <span>CUIT: {formatCUIT(perfil.cuit)}</span>
             </div>
           </div>
           <div className="mt-4 md:mt-0">
             <Badge
               variant="success"
-              className={`${getClassificationColor(MOCK_PROFILE.clasificacion)} text-lg px-4 py-2 border-2`}
+              className={`${getClassificationColor(perfil.clasificacion)} text-lg px-4 py-2 border-2`}
             >
-              {MOCK_PROFILE.clasificacion}
+              {perfil.clasificacion}
             </Badge>
           </div>
         </div>
@@ -63,25 +86,25 @@ const ProfilePage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard
           label="Facturación Anual"
-          value={MOCK_PROFILE.total_anual}
+          value={perfil.facturacion_anual}
           type="currency"
           icon={DollarSign}
         />
         <MetricCard
-          label="Unidades Vendidas"
-          value={MOCK_PROFILE.total_unidades}
+          label="Unidades Compradas"
+          value={perfil.unidades_compradas}
           type="number"
           icon={Package}
         />
         <MetricCard
           label="Cantidad de Pedidos"
-          value={MOCK_PROFILE.cant_pedidos}
+          value={perfil.cantidad_pedidos}
           type="number"
           icon={ShoppingBag}
         />
         <MetricCard
           label="Subrubros Activos"
-          value={MOCK_PROFILE.subrubros_activos}
+          value={perfil.subrubros_activos}
           type="number"
           icon={Layers}
         />
@@ -98,10 +121,10 @@ const ProfilePage = () => {
               </div>
               <div className="flex-1">
                 <h4 className="font-semibold text-blue-industrial mb-1">
-                  {MOCK_PROFILE.clasificacion}
+                  {perfil.clasificacion}
                 </h4>
                 <p className="text-sm text-gray-text">
-                  Cliente activo con potencial de crecimiento, facturación entre $1M y $3M anuales.
+                  {getClassificationDescription(perfil.clasificacion)}
                 </p>
               </div>
             </div>
@@ -142,7 +165,7 @@ const ProfilePage = () => {
                   Período de Análisis
                 </h4>
                 <p className="text-sm text-gray-text">
-                  Datos del período: {MOCK_PROFILE.periodo_analisis}
+                  Datos de los últimos 12 meses
                 </p>
               </div>
             </div>
@@ -150,13 +173,13 @@ const ProfilePage = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-orange-50 rounded-lg p-4 text-center">
                 <p className="text-2xl font-bold text-orange-mechanic">
-                  {MOCK_PROFILE.subrubros_activos}
+                  {perfil.subrubros_activos}
                 </p>
                 <p className="text-xs text-gray-text mt-1">Categorías Activas</p>
               </div>
               <div className="bg-blue-50 rounded-lg p-4 text-center">
                 <p className="text-2xl font-bold text-blue-industrial">
-                  21K
+                  {formatCurrency(ticketPromedio)}
                 </p>
                 <p className="text-xs text-gray-text mt-1">Ticket Promedio</p>
               </div>
@@ -173,56 +196,44 @@ const ProfilePage = () => {
         </Card>
       </div>
 
-      {/* Resumen de Compras */}
-      <Card title="Resumen de Compras por Categoría">
+      {/* Compras Recientes */}
+      <Card title="Compras Recientes">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b-2 border-gray-medium">
-                <th className="text-left py-3 px-4 font-semibold text-blue-industrial">Categoría</th>
-                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">Importe</th>
-                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">Unidades</th>
-                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">Pedidos</th>
-                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">% Total</th>
+                <th className="text-left py-3 px-4 font-semibold text-blue-industrial">Fecha</th>
+                <th className="text-left py-3 px-4 font-semibold text-blue-industrial">Artículo</th>
+                <th className="text-left py-3 px-4 font-semibold text-blue-industrial">Subrubro</th>
+                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">Cantidad</th>
+                <th className="text-right py-3 px-4 font-semibold text-blue-industrial">Monto</th>
               </tr>
             </thead>
             <tbody>
-              <tr className="border-b border-gray-medium hover:bg-gray-light">
-                <td className="py-3 px-4 font-medium">FRENOS</td>
-                <td className="py-3 px-4 text-right">$850.000</td>
-                <td className="py-3 px-4 text-right">4.500</td>
-                <td className="py-3 px-4 text-right">45</td>
-                <td className="py-3 px-4 text-right">
-                  <Badge variant="info">34%</Badge>
-                </td>
-              </tr>
-              <tr className="border-b border-gray-medium hover:bg-gray-light">
-                <td className="py-3 px-4 font-medium">SUSPENSIÓN</td>
-                <td className="py-3 px-4 text-right">$650.000</td>
-                <td className="py-3 px-4 text-right">3.200</td>
-                <td className="py-3 px-4 text-right">38</td>
-                <td className="py-3 px-4 text-right">
-                  <Badge variant="info">26%</Badge>
-                </td>
-              </tr>
-              <tr className="border-b border-gray-medium hover:bg-gray-light">
-                <td className="py-3 px-4 font-medium">MOTOR</td>
-                <td className="py-3 px-4 text-right">$550.000</td>
-                <td className="py-3 px-4 text-right">2.800</td>
-                <td className="py-3 px-4 text-right">32</td>
-                <td className="py-3 px-4 text-right">
-                  <Badge variant="info">22%</Badge>
-                </td>
-              </tr>
-              <tr className="border-b border-gray-medium hover:bg-gray-light">
-                <td className="py-3 px-4 font-medium">ELÉCTRICO</td>
-                <td className="py-3 px-4 text-right">$450.000</td>
-                <td className="py-3 px-4 text-right">4.500</td>
-                <td className="py-3 px-4 text-right">28</td>
-                <td className="py-3 px-4 text-right">
-                  <Badge variant="info">18%</Badge>
-                </td>
-              </tr>
+              {perfil.compras_recientes && perfil.compras_recientes.length > 0 ? (
+                perfil.compras_recientes.map((compra, idx) => (
+                  <tr key={idx} className="border-b border-gray-medium hover:bg-gray-light">
+                    <td className="py-3 px-4">{compra.fecha}</td>
+                    <td className="py-3 px-4">
+                      <div className="font-medium">{compra.codigo_articulo}</div>
+                      <div className="text-xs text-gray-text">{compra.nombre_articulo}</div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <Badge variant="info">{compra.subrubro}</Badge>
+                    </td>
+                    <td className="py-3 px-4 text-right">{compra.cantidad}</td>
+                    <td className="py-3 px-4 text-right font-medium">
+                      {formatCurrency(compra.monto)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="py-8 text-center text-gray-text">
+                    No hay compras recientes para mostrar
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

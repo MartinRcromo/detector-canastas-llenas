@@ -1,48 +1,46 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { useCliente } from '../context/ClienteContext';
+import { useApi } from '../hooks/useApi';
+import api from '../services/api';
 import Card from '../components/Card';
 import ProgressBar from '../components/ProgressBar';
 import Button from '../components/Button';
 import FamiliaCard from '../components/FamiliaCard';
 import FamiliaConfirmadaItem from '../components/FamiliaConfirmadaItem';
-
-// DATOS MOCK - Familias ya confirmadas
-const FAMILIAS_CONFIRMADAS = [
-  { id: 1, nombre: "Filtros", subfamilias: "(aire, aceite, combustible)", confirmada: true },
-  { id: 2, nombre: "Frenos", subfamilias: "(pastillas, discos, tambores)", confirmada: true },
-  { id: 3, nombre: "Aceites y lubricantes", subfamilias: "", confirmada: true },
-  { id: 4, nombre: "Iluminación", subfamilias: "(lámparas, faros)", confirmada: true },
-  { id: 5, nombre: "Suspensión", subfamilias: "(amortiguadores, resortes)", confirmada: true },
-];
-
-// DATOS MOCK - Familias disponibles para agregar
-const FAMILIAS_DISPONIBLES = [
-  { id: 6, nombre: "Transmisión", icono: "Cog" },
-  { id: 7, nombre: "Embrague", icono: "CircleDot" },
-  { id: 8, nombre: "Refrigeración", icono: "Droplet" },
-  { id: 9, nombre: "Baterías", icono: "Battery" },
-  { id: 10, nombre: "Escapes", icono: "Wind" },
-  { id: 11, nombre: "Distribución", icono: "Activity" },
-  { id: 12, nombre: "Encendido", icono: "Zap" },
-  { id: 13, nombre: "Eléctrico", icono: "Plug" },
-  { id: 14, nombre: "Limpiaparabrisas", icono: "Droplets" },
-  { id: 15, nombre: "Dirección", icono: "Navigation" },
-  { id: 16, nombre: "Juntas", icono: "Circle" },
-  { id: 17, nombre: "Retenes", icono: "Disc" },
-];
-
-const TOTAL_FAMILIAS = 20;
+import Loading from '../components/Loading';
+import ErrorMessage from '../components/ErrorMessage';
 
 const PortfolioPage = () => {
   const navigate = useNavigate();
+  const { cuit } = useCliente();
+  const { data: portfolio, loading, error } = useApi(() => api.getPortfolio(cuit), [cuit]);
+
   const [familiasSeleccionadas, setFamiliasSeleccionadas] = useState([]);
   const [mostrarAyuda, setMostrarAyuda] = useState(false);
   const [busqueda, setBusqueda] = useState('');
 
-  // Calcular progreso
-  const familiasActuales = FAMILIAS_CONFIRMADAS.length + familiasSeleccionadas.length;
-  const porcentajeCompletado = Math.round((familiasActuales / TOTAL_FAMILIAS) * 100);
+  if (loading) {
+    return <Loading message="Cargando portfolio..." />;
+  }
+
+  if (error) {
+    return (
+      <ErrorMessage
+        title="Error al cargar el portfolio"
+        message={error}
+      />
+    );
+  }
+
+  if (!portfolio) {
+    return null;
+  }
+
+  // Calcular progreso incluyendo las familias seleccionadas por el usuario
+  const familiasActuales = portfolio.familias_confirmadas.length + familiasSeleccionadas.length;
+  const porcentajeCompletado = Math.round((familiasActuales / portfolio.total_familias_posibles) * 100);
 
   const toggleFamilia = (familiaId) => {
     if (familiasSeleccionadas.includes(familiaId)) {
@@ -52,12 +50,19 @@ const PortfolioPage = () => {
     }
   };
 
+  // Filtrar familias disponibles por búsqueda
+  const familiasDisponiblesFiltradas = busqueda
+    ? portfolio.familias_disponibles.filter(f =>
+        f.nombre.toLowerCase().includes(busqueda.toLowerCase())
+      )
+    : portfolio.familias_disponibles;
+
   return (
     <div className="space-y-8">
       {/* Header Contextual */}
       <div>
         <h1 className="text-3xl font-bold text-blue-industrial mb-2">
-          🛠️ Completá tu Portfolio
+          Completá tu Portfolio
         </h1>
         <p className="text-gray-text">
           Confirmá qué familias manejás hoy y agregá las que faltan. Esto nos ayuda a mostrarte solo lo relevante.
@@ -71,12 +76,12 @@ const PortfolioPage = () => {
             Tu progreso de portfolio
           </h3>
           <p className="text-4xl font-bold text-green-progress mb-4">
-            {familiasActuales} de {TOTAL_FAMILIAS} familias básicas
+            {familiasActuales} de {portfolio.total_familias_posibles} familias básicas
           </p>
         </div>
         <ProgressBar
           current={familiasActuales}
-          target={TOTAL_FAMILIAS}
+          target={portfolio.total_familias_posibles}
           showPercentage={true}
         />
       </Card>
@@ -91,47 +96,68 @@ const PortfolioPage = () => {
         </p>
 
         <Card>
-          <div className="divide-y divide-gray-medium">
-            {FAMILIAS_CONFIRMADAS.map((familia) => (
-              <FamiliaConfirmadaItem
-                key={familia.id}
-                nombre={familia.nombre}
-                subfamilias={familia.subfamilias}
-              />
-            ))}
-          </div>
-          <button className="mt-4 text-blue-industrial hover:text-orange-mechanic font-medium text-sm transition-colors">
-            + Ver todas las confirmadas (7)
-          </button>
+          {portfolio.familias_confirmadas.length > 0 ? (
+            <>
+              <div className="divide-y divide-gray-medium">
+                {portfolio.familias_confirmadas.map((familia) => (
+                  <FamiliaConfirmadaItem
+                    key={familia.id}
+                    nombre={familia.nombre}
+                    subfamilias={familia.subfamilias}
+                  />
+                ))}
+              </div>
+              {portfolio.familias_confirmadas.length > 5 && (
+                <button className="mt-4 text-blue-industrial hover:text-orange-mechanic font-medium text-sm transition-colors">
+                  + Ver todas las confirmadas ({portfolio.familias_confirmadas.length})
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8 text-gray-text">
+              <p>No se detectaron familias confirmadas aún.</p>
+              <p className="text-sm mt-2">Seleccioná las familias que manejás a continuación.</p>
+            </div>
+          )}
         </Card>
       </div>
 
       {/* Sección 3: Agregá Familias */}
-      <div>
-        <h2 className="text-2xl font-bold text-blue-industrial mb-2">
-          ➕ Agregá otras familias que vendés
-        </h2>
-        <p className="text-gray-text mb-6">
-          Seleccioná todas las que apliquen a tu negocio
-        </p>
+      {portfolio.familias_disponibles.length > 0 && (
+        <div>
+          <h2 className="text-2xl font-bold text-blue-industrial mb-2">
+            ➕ Agregá otras familias que vendés
+          </h2>
+          <p className="text-gray-text mb-6">
+            Seleccioná todas las que apliquen a tu negocio
+          </p>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {FAMILIAS_DISPONIBLES.map((familia) => (
-            <FamiliaCard
-              key={familia.id}
-              familia={familia}
-              isSelected={familiasSeleccionadas.includes(familia.id)}
-              onClick={() => toggleFamilia(familia.id)}
-            />
-          ))}
-        </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {familiasDisponiblesFiltradas.map((familia) => (
+              <FamiliaCard
+                key={familia.id}
+                familia={familia}
+                isSelected={familiasSeleccionadas.includes(familia.id)}
+                onClick={() => toggleFamilia(familia.id)}
+              />
+            ))}
+          </div>
 
-        <div className="mt-6 text-center">
-          <button className="text-blue-industrial hover:text-orange-mechanic font-medium transition-colors">
-            Cargar más familias ↓
-          </button>
+          {familiasDisponiblesFiltradas.length === 0 && busqueda && (
+            <div className="text-center py-8 text-gray-text">
+              No se encontraron familias con "{busqueda}"
+            </div>
+          )}
+
+          {familiasSeleccionadas.length > 0 && (
+            <div className="mt-6 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+              <p className="text-green-800 font-medium text-center">
+                ✓ {familiasSeleccionadas.length} familia{familiasSeleccionadas.length > 1 ? 's' : ''} seleccionada{familiasSeleccionadas.length > 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Sección 4: Buscador */}
       <Card>
@@ -142,7 +168,7 @@ const PortfolioPage = () => {
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-text" size={20} />
           <input
             type="text"
-            placeholder="🔎 Buscá por nombre..."
+            placeholder="Buscá por nombre..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="w-full h-12 pl-10 pr-4 border-2 border-gray-medium rounded-lg
@@ -150,7 +176,7 @@ const PortfolioPage = () => {
           />
         </div>
         <p className="text-sm text-gray-text mt-2">
-          Ejemplos: "cilindro", "pastilla", "sensor"
+          Ejemplos: "transmisión", "refrigeración", "batería"
         </p>
       </Card>
 
