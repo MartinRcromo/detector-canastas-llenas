@@ -92,30 +92,65 @@ Columnas requeridas:
 - `cantidad` (int) - Cantidad vendida
 - `monto` (float) - Monto total de la venta
 
-## 🚢 Deploy en Railway
+## 🚢 Deploy en Railway (RECOMENDADO)
+
+### Archivos de Configuración Incluidos:
+- ✅ `railway.json` - Configuración de build y deploy
+- ✅ `Procfile` - Comando de inicio
+- ✅ `runtime.txt` - Python 3.11
+- ✅ `requirements.txt` - Dependencias
+
+### Pasos Detallados:
 
 1. **Crear cuenta en Railway**
    - Visitar https://railway.app
    - Conectar con GitHub
 
 2. **Crear nuevo proyecto**
-   - New Project → Deploy from GitHub repo
-   - Seleccionar el repositorio
+   - Click en "New Project"
+   - Seleccionar "Deploy from GitHub repo"
+   - Buscar: `MartinRcromo/detector-canastas-llenas`
+   - Railway detectará automáticamente el proyecto
 
-3. **Configurar variables de entorno**
-   - Settings → Variables
+3. **Configurar el servicio**
+   - En Settings del servicio:
+     - **Root Directory**: `api` ⚠️ IMPORTANTE
+     - Start Command: Auto-detectado desde `railway.json`
+     - Health Check: `/health` (configurado automáticamente)
+
+4. **Configurar variables de entorno**
+   - Click en "Variables" en el servicio
    - Agregar:
-     - `SUPABASE_URL`
-     - `SUPABASE_KEY`
-     - `ENVIRONMENT=production`
+     ```
+     SUPABASE_URL=https://tu-proyecto.supabase.co
+     SUPABASE_KEY=tu-anon-key-aqui
+     ENVIRONMENT=production
+     ```
 
-4. **Configurar build**
-   - Railway detectará automáticamente Python
-   - Comando de inicio: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   **Obtener credenciales de Supabase:**
+   1. Ir a https://supabase.com
+   2. Abrir tu proyecto
+   3. Settings → API
+   4. Copiar "URL" y "anon public key"
 
-5. **Deploy**
-   - Railway hará deploy automático
-   - Obtener URL pública del servicio
+5. **Deploy automático**
+   - Railway hace build automático
+   - Health check en `/health` verifica el deployment
+   - Auto-restart si falla (máx 10 reintentos)
+
+6. **Obtener URL del servicio**
+   - Settings → Domains → Generate Domain
+   - Copiar URL: `https://tu-api.up.railway.app`
+   - **Guardar esta URL para el frontend**
+
+7. **Verificar deployment**
+   - Health: `https://tu-api.up.railway.app/health`
+   - Docs: `https://tu-api.up.railway.app/docs`
+
+### Monitoreo y Logs:
+- Logs en tiempo real en Railway dashboard
+- Métricas de CPU/RAM/Network
+- Health checks cada 60 segundos
 
 ## 🚢 Deploy en Render
 
