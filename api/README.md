@@ -1,13 +1,14 @@
 # Detector Canastas Llenas - API Backend
 
-API Backend FastAPI + Supabase para análisis de cross-selling B2B en distribuidora de autopartes.
+API Backend FastAPI + SQLAlchemy + PostgreSQL para análisis de cross-selling B2B en distribuidora de autopartes.
 
 ## 🚀 Tecnologías
 
 - **FastAPI** - Framework web moderno y de alto rendimiento
-- **Supabase** - Base de datos PostgreSQL
-- **Pandas** - Análisis de datos y co-ocurrencia
+- **SQLAlchemy** - ORM y conexión a PostgreSQL
+- **PostgreSQL** - Base de datos relacional (Supabase)
 - **Pydantic** - Validación de datos y modelos
+- **Python nativo** - Análisis de datos sin pandas (optimizado para Railway)
 
 ## 📋 Endpoints
 
@@ -61,10 +62,9 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Editar `.env` con tus credenciales de Supabase:
+Editar `.env` con tu URL de PostgreSQL:
 ```env
-SUPABASE_URL=https://tu-proyecto.supabase.co
-SUPABASE_KEY=tu-anon-key
+DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require
 ENVIRONMENT=development
 ```
 
@@ -122,16 +122,15 @@ Columnas requeridas:
    - Click en "Variables" en el servicio
    - Agregar:
      ```
-     SUPABASE_URL=https://tu-proyecto.supabase.co
-     SUPABASE_KEY=tu-anon-key-aqui
+     DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require
      ENVIRONMENT=production
      ```
 
-   **Obtener credenciales de Supabase:**
+   **Obtener DATABASE_URL desde Supabase:**
    1. Ir a https://supabase.com
    2. Abrir tu proyecto
-   3. Settings → API
-   4. Copiar "URL" y "anon public key"
+   3. Settings → Database → Connection String → URI
+   4. Copiar la connection string completa (modo "Session")
 
 5. **Deploy automático**
    - Railway hace build automático
@@ -171,8 +170,7 @@ Columnas requeridas:
 
 4. **Variables de entorno**
    - Agregar en Environment:
-     - `SUPABASE_URL`
-     - `SUPABASE_KEY`
+     - `DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require`
      - `ENVIRONMENT=production`
 
 5. **Deploy**
