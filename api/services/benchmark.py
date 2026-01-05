@@ -1,10 +1,11 @@
 """
 Servicio de benchmark y análisis de co-ocurrencia
 Identifica oportunidades de cross-selling basado en clientes similares
+VERSION SIMPLIFICADA SIN PANDAS
 """
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
-import pandas as pd
+from typing import List, Dict
+from collections import defaultdict
 from database import get_supabase
 
 # Empresas del grupo para análisis
@@ -52,7 +53,7 @@ def obtener_clientes_similares(
 
     # Obtener todos los clientes y su facturación
     response_todos = supabase.table("ventas") \
-        .select("cuit, cliente, monto") \
+        .select("cuit, monto") \
         .gte("fecha", fecha_12_meses) \
         .in_("empresa", EMPRESAS_GRUPO) \
         .neq("cuit", cuit_objetivo) \
@@ -61,27 +62,29 @@ def obtener_clientes_similares(
     if not response_todos.data:
         return []
 
-    # Agrupar por CUIT y calcular facturación
-    df = pd.DataFrame(response_todos.data)
-    facturacion_por_cliente = df.groupby("cuit")["monto"].sum().reset_index()
-    facturacion_por_cliente.columns = ["cuit", "facturacion"]
+    # Agrupar por CUIT y calcular facturación usando diccionarios
+    facturacion_por_cliente = defaultdict(float)
+    for venta in response_todos.data:
+        cuit = venta.get("cuit")
+        monto = venta.get("monto", 0)
+        if cuit:
+            facturacion_por_cliente[cuit] += monto
 
     # Filtrar por rango de facturación
-    clientes_similares = facturacion_por_cliente[
-        (facturacion_por_cliente["facturacion"] >= facturacion_min) &
-        (facturacion_por_cliente["facturacion"] <= facturacion_max)
-    ]
+    clientes_en_rango = []
+    for cuit, facturacion in facturacion_por_cliente.items():
+        if facturacion_min <= facturacion <= facturacion_max:
+            diferencia = abs(facturacion - facturacion_objetivo)
+            clientes_en_rango.append((cuit, facturacion, diferencia))
 
-    # Ordenar por similitud (más cercano a facturación objetivo) y tomar top_n
-    clientes_similares["diferencia"] = abs(
-        clientes_similares["facturacion"] - facturacion_objetivo
-    )
-    clientes_similares = clientes_similares.sort_values("diferencia").head(top_n)
+    # Ordenar por similitud (menor diferencia primero) y tomar top_n
+    clientes_en_rango.sort(key=lambda x: x[2])
+    clientes_similares = [cuit for cuit, _, _ in clientes_en_rango[:top_n]]
 
-    return clientes_similares["cuit"].tolist()
+    return clientes_similares
 
 
-def calcular_matriz_coocurrencia(cuits: List[str]) -> pd.DataFrame:
+def calcular_matriz_coocurrencia(cuits: List[str]) -> Dict[str, Dict[str, int]]:
     """
     Calcula la matriz de co-ocurrencia de subrubros para un conjunto de clientes
 
@@ -89,7 +92,7 @@ def calcular_matriz_coocurrencia(cuits: List[str]) -> pd.DataFrame:
         cuits: Lista de CUITs a analizar
 
     Returns:
-        DataFrame con la matriz de co-ocurrencia (subrubro x subrubro)
+        Diccionario con la matriz de co-ocurrencia (subrubro -> subrubro -> count)
     """
     supabase = get_supabase()
     fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
@@ -103,26 +106,27 @@ def calcular_matriz_coocurrencia(cuits: List[str]) -> pd.DataFrame:
         .execute()
 
     if not response.data:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(response.data)
+        return {}
 
     # Obtener subrubros únicos por cliente
-    subrubros_por_cliente = df.groupby("cuit")["subrubro"].apply(set).reset_index()
+    subrubros_por_cliente = defaultdict(set)
+    for venta in response.data:
+        cuit = venta.get("cuit")
+        subrubro = venta.get("subrubro")
+        if cuit and subrubro:
+            subrubros_por_cliente[cuit].add(subrubro)
 
     # Calcular co-ocurrencias
-    subrubros_unicos = df["subrubro"].unique()
-    matriz = pd.DataFrame(0, index=subrubros_unicos, columns=subrubros_unicos)
+    matriz = defaultdict(lambda: defaultdict(int))
 
-    for _, row in subrubros_por_cliente.iterrows():
-        subrubros = list(row["subrubro"])
-        for i, sub1 in enumerate(subrubros):
-            for sub2 in subrubros[i:]:
-                if sub1 != sub2:
-                    matriz.loc[sub1, sub2] += 1
-                    matriz.loc[sub2, sub1] += 1
+    for cuit, subrubros in subrubros_por_cliente.items():
+        subrubros_lista = list(subrubros)
+        for i, sub1 in enumerate(subrubros_lista):
+            for sub2 in subrubros_lista[i+1:]:
+                matriz[sub1][sub2] += 1
+                matriz[sub2][sub1] += 1
 
-    return matriz
+    return dict(matriz)
 
 
 def identificar_oportunidades(
@@ -172,21 +176,20 @@ def identificar_oportunidades(
     # 3. Calcular matriz de co-ocurrencia
     matriz = calcular_matriz_coocurrencia(clientes_similares)
 
-    if matriz.empty:
+    if not matriz:
         return []
 
     # 4. Identificar subrubros que el cliente NO tiene pero co-ocurren con los que sí tiene
     oportunidades = []
 
     for subrubro_tiene in subrubros_cliente:
-        if subrubro_tiene not in matriz.index:
+        if subrubro_tiene not in matriz:
             continue
 
         # Obtener co-ocurrencias con subrubros que el cliente NO tiene
-        coocurrencias = matriz.loc[subrubro_tiene]
+        coocurrencias = matriz[subrubro_tiene]
         for subrubro_oportunidad, count in coocurrencias.items():
-            if (subrubro_oportunidad not in subrubros_cliente and
-                count >= min_coocurrencia):
+            if subrubro_oportunidad not in subrubros_cliente and count >= min_coocurrencia:
                 oportunidades.append({
                     "familia": subrubro_oportunidad,
                     "razon": f"Clientes similares que compran {subrubro_tiene} también compran esto",
@@ -198,16 +201,33 @@ def identificar_oportunidades(
     if not oportunidades:
         return []
 
-    df_oportunidades = pd.DataFrame(oportunidades)
-    df_agrupado = df_oportunidades.groupby("familia").agg({
-        "score": "sum",
-        "coocurrencia": "max",
-        "razon": "first"
-    }).reset_index()
+    # Agrupar manualmente por familia
+    familias_agrupadas = defaultdict(lambda: {"score": 0, "coocurrencia": 0, "razon": ""})
 
-    df_agrupado = df_agrupado.sort_values("score", ascending=False).head(top_familias)
+    for opp in oportunidades:
+        familia = opp["familia"]
+        familias_agrupadas[familia]["score"] += opp["score"]
+        familias_agrupadas[familia]["coocurrencia"] = max(
+            familias_agrupadas[familia]["coocurrencia"],
+            opp["coocurrencia"]
+        )
+        if not familias_agrupadas[familia]["razon"]:
+            familias_agrupadas[familia]["razon"] = opp["razon"]
 
-    return df_agrupado.to_dict("records")
+    # Convertir a lista y ordenar por score
+    resultado = [
+        {
+            "familia": familia,
+            "score": datos["score"],
+            "coocurrencia": datos["coocurrencia"],
+            "razon": datos["razon"]
+        }
+        for familia, datos in familias_agrupadas.items()
+    ]
+
+    # Ordenar por score descendente y tomar top_familias
+    resultado.sort(key=lambda x: x["score"], reverse=True)
+    return resultado[:top_familias]
 
 
 def estimar_potencial_familia(
@@ -243,9 +263,10 @@ def estimar_potencial_familia(
     if not response.data:
         return 100000.0  # Default si no hay datos
 
-    df = pd.DataFrame(response.data)
-    facturacion_total = df["monto"].sum()
-    cantidad_clientes = df["cuit"].nunique()
+    # Calcular totales usando diccionarios
+    facturacion_total = sum(v.get("monto", 0) for v in response.data)
+    cuits_unicos = set(v.get("cuit") for v in response.data if v.get("cuit"))
+    cantidad_clientes = len(cuits_unicos)
 
     if cantidad_clientes == 0:
         return 100000.0

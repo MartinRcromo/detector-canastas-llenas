@@ -1,9 +1,11 @@
 """
 Endpoint para oportunidades de cross-selling
 GET /api/oportunidades/{cuit}
+VERSION SIMPLIFICADA SIN PANDAS
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
+from collections import defaultdict
 from database import get_supabase
 from models.responses import (
     OportunidadesResponse,
@@ -54,34 +56,52 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
         if not response.data:
             return []
 
-        # Agrupar por artículo y calcular totales
-        import pandas as pd
-        df = pd.DataFrame(response.data)
+        # Agrupar por artículo usando diccionarios
+        productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": ""})
 
-        productos_agrupados = df.groupby(["articulo_codigo", "articulo_nombre"]).agg({
-            "cantidad": "sum",
-            "monto": "sum"
-        }).reset_index()
+        for venta in response.data:
+            codigo = venta.get("articulo_codigo")
+            nombre = venta.get("articulo_nombre", "")
+            cantidad = venta.get("cantidad", 0)
+            monto = venta.get("monto", 0)
 
-        productos_agrupados = productos_agrupados.sort_values("monto", ascending=False).head(limit)
+            if codigo:
+                productos_dict[codigo]["cantidad"] += cantidad
+                productos_dict[codigo]["monto"] += monto
+                if not productos_dict[codigo]["nombre"]:
+                    productos_dict[codigo]["nombre"] = nombre
+
+        # Convertir a lista y ordenar por monto
+        productos_lista = [
+            {
+                "codigo": codigo,
+                "nombre": datos["nombre"],
+                "cantidad": datos["cantidad"],
+                "monto": datos["monto"]
+            }
+            for codigo, datos in productos_dict.items()
+        ]
+
+        productos_lista.sort(key=lambda x: x["monto"], reverse=True)
+        productos_top = productos_lista[:limit]
 
         # Formatear como ProductoSugerido
         productos = []
-        for _, row in productos_agrupados.iterrows():
+        for producto in productos_top:
             # Calcular precio promedio
-            precio = row["monto"] / row["cantidad"] if row["cantidad"] > 0 else 0
+            precio = producto["monto"] / producto["cantidad"] if producto["cantidad"] > 0 else 0
 
             # Determinar demanda basada en cantidad vendida
-            if row["cantidad"] >= 100:
+            if producto["cantidad"] >= 100:
                 demanda = "Alta"
-            elif row["cantidad"] >= 50:
+            elif producto["cantidad"] >= 50:
                 demanda = "Media"
             else:
                 demanda = "Baja"
 
             productos.append(ProductoSugerido(
-                codigo=row["articulo_codigo"],
-                nombre=row["articulo_nombre"],
+                codigo=producto["codigo"],
+                nombre=producto["nombre"],
                 precio=round(precio, 2),
                 demanda=demanda
             ))
@@ -127,28 +147,55 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
         if not response_global.data:
             return []
 
-        import pandas as pd
-        df = pd.DataFrame(response_global.data)
+        # Agrupar productos usando diccionarios
+        productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": "", "subrubro": ""})
 
-        # Filtrar productos que el cliente NO tiene
-        df = df[~df["articulo_codigo"].isin(articulos_cliente)]
+        for venta in response_global.data:
+            codigo = venta.get("articulo_codigo")
+            nombre = venta.get("articulo_nombre", "")
+            subrubro = venta.get("subrubro", "")
+            cantidad = venta.get("cantidad", 0)
+            monto = venta.get("monto", 0)
 
-        # Agrupar y calcular métricas
-        productos_agrupados = df.groupby(["articulo_codigo", "articulo_nombre", "subrubro"]).agg({
-            "cantidad": "sum",
-            "monto": "sum"
-        }).reset_index()
+            # Filtrar productos que el cliente YA tiene
+            if codigo and codigo not in articulos_cliente:
+                productos_dict[codigo]["cantidad"] += cantidad
+                productos_dict[codigo]["monto"] += monto
+                if not productos_dict[codigo]["nombre"]:
+                    productos_dict[codigo]["nombre"] = nombre
+                if not productos_dict[codigo]["subrubro"]:
+                    productos_dict[codigo]["subrubro"] = subrubro
 
-        productos_agrupados["precio"] = productos_agrupados["monto"] / productos_agrupados["cantidad"]
-        productos_agrupados = productos_agrupados.sort_values("monto", ascending=False).head(limit)
+        # Convertir a lista y ordenar por monto
+        productos_lista = [
+            {
+                "codigo": codigo,
+                "nombre": datos["nombre"],
+                "subrubro": datos["subrubro"],
+                "cantidad": datos["cantidad"],
+                "monto": datos["monto"],
+                "precio": datos["monto"] / datos["cantidad"] if datos["cantidad"] > 0 else 0
+            }
+            for codigo, datos in productos_dict.items()
+        ]
+
+        productos_lista.sort(key=lambda x: x["monto"], reverse=True)
+        productos_top = productos_lista[:limit]
 
         # Formatear como ProductoDestacado
         destacados = []
-        for idx, row in productos_agrupados.iterrows():
+        razones = [
+            "Top ventas en tu segmento",
+            "Complementa tu portfolio",
+            "Tendencia creciente",
+            "Alta demanda regional"
+        ]
+
+        for idx, producto in enumerate(productos_top):
             # Determinar rotación
-            if row["cantidad"] >= 100:
+            if producto["cantidad"] >= 100:
                 rotacion = "Muy Alta"
-            elif row["cantidad"] >= 50:
+            elif producto["cantidad"] >= 50:
                 rotacion = "Alta"
             else:
                 rotacion = "Media"
@@ -156,18 +203,11 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
             # Margen estimado (simplificado - podría venir de otra tabla)
             margen = 30.0 + (idx * 5)  # Variación de margen
 
-            razones = [
-                "Top ventas en tu segmento",
-                "Complementa tu portfolio",
-                "Tendencia creciente",
-                "Alta demanda regional"
-            ]
-
             destacados.append(ProductoDestacado(
-                codigo=row["articulo_codigo"],
-                nombre=row["articulo_nombre"],
-                familia=row["subrubro"],
-                precio=round(row["precio"], 2),
+                codigo=producto["codigo"],
+                nombre=producto["nombre"],
+                familia=producto["subrubro"],
+                precio=round(producto["precio"], 2),
                 margen=round(margen, 1),
                 rotacion=rotacion,
                 razon=razones[idx % len(razones)]
