@@ -4,23 +4,23 @@ Configuración de conexión a PostgreSQL usando SQLAlchemy
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
 
-# Configuración de PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL")
+# DATABASE_URL con fallback (Railway-friendly)
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres.hqyuqslepvholsarirbg:J4h28fsLRj21WOUZ@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
+)
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL debe estar configurado en .env")
-
-# Crear engine de SQLAlchemy
+# Crear engine con configuración para Railway
 engine = create_engine(
     DATABASE_URL,
-    pool_size=5,
-    max_overflow=10,
-    pool_pre_ping=True,  # Verifica conexiones antes de usarlas
+    poolclass=NullPool,  # Railway funciona mejor sin connection pooling
+    connect_args={"sslmode": "require"},
     echo=False  # Set True para debug SQL
 )
 
