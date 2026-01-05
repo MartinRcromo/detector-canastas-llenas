@@ -1,14 +1,11 @@
 """
 API Backend para Detector de Canastas Llenas
-FastAPI + Supabase
+FastAPI + SQLAlchemy + PostgreSQL
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import os
-
-# Importar database
-from database import get_supabase
 
 # Importar routers
 from routes import perfil, portfolio, oportunidades, planes

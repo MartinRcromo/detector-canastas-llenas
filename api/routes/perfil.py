@@ -4,7 +4,7 @@ GET /api/perfil/{cuit}
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
-from database import get_supabase
+from database import execute_query
 from models.responses import PerfilResponse, CompraReciente
 
 router = APIRouter()
@@ -35,23 +35,21 @@ async def get_perfil(cuit: str):
     - Compras recientes (últimos 10 registros)
     """
     try:
-        supabase = get_supabase()
-
         # Calcular fecha de hace 12 meses
         fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
         # Obtener todas las ventas del cliente en los últimos 12 meses
-        response = supabase.table("ventas") \
-            .select("*") \
-            .eq("cuit", cuit) \
-            .gte("fecha", fecha_12_meses) \
-            .order("fecha", desc=True) \
-            .execute()
+        query = """
+            SELECT * FROM ventas
+            WHERE cuit = :cuit
+            AND fecha >= :fecha_12_meses
+            ORDER BY fecha DESC
+        """
 
-        if not response.data:
+        ventas = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+
+        if not ventas:
             raise HTTPException(status_code=404, detail=f"No se encontraron datos para el CUIT {cuit}")
-
-        ventas = response.data
 
         # Obtener nombre de empresa del primer registro
         nombre_empresa = ventas[0].get("cliente", "Cliente sin nombre")

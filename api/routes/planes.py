@@ -4,7 +4,7 @@ GET /api/planes/{cuit}
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
-from database import get_supabase
+from database import execute_query
 from models.responses import PlanesResponse, Tier
 from typing import Optional
 
@@ -124,23 +124,23 @@ async def get_planes(cuit: str):
     - Beneficios de cada tier
     """
     try:
-        supabase = get_supabase()
-
         # Calcular fecha de hace 12 meses
         fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
         # Obtener facturación anual del cliente
-        response = supabase.table("ventas") \
-            .select("monto") \
-            .eq("cuit", cuit) \
-            .gte("fecha", fecha_12_meses) \
-            .execute()
+        query = """
+            SELECT monto FROM ventas
+            WHERE cuit = :cuit
+            AND fecha >= :fecha_12_meses
+        """
 
-        if not response.data:
+        ventas_data = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+
+        if not ventas_data:
             # Cliente sin datos - asignar tier Bronze por defecto
             facturacion_anual = 0.0
         else:
-            facturacion_anual = sum(v.get("monto", 0) for v in response.data)
+            facturacion_anual = sum(v.get("monto", 0) for v in ventas_data)
 
         # Determinar tier actual
         tier_actual_nombre = calcular_tier_actual(facturacion_anual)

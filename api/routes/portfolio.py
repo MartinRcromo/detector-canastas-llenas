@@ -4,7 +4,7 @@ GET /api/portfolio/{cuit}
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
-from database import get_supabase
+from database import execute_query
 from models.responses import PortfolioResponse, FamiliaConfirmada, FamiliaDisponible
 
 router = APIRouter()
@@ -70,19 +70,19 @@ async def get_portfolio(cuit: str):
     3. Retorna las familias no confirmadas como "disponibles"
     """
     try:
-        supabase = get_supabase()
-
         # Calcular fecha de hace 12 meses
         fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
         # Obtener subrubros únicos del cliente
-        response = supabase.table("ventas") \
-            .select("subrubro") \
-            .eq("cuit", cuit) \
-            .gte("fecha", fecha_12_meses) \
-            .execute()
+        query = """
+            SELECT subrubro FROM ventas
+            WHERE cuit = :cuit
+            AND fecha >= :fecha_12_meses
+        """
 
-        if not response.data:
+        subrubros_data = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+
+        if not subrubros_data:
             # Cliente sin compras recientes - todas las familias están disponibles
             familias_disponibles = [
                 FamiliaDisponible(id=f["id"], nombre=f["nombre"], icono=f["icono"])
@@ -97,7 +97,7 @@ async def get_portfolio(cuit: str):
             )
 
         # Obtener subrubros únicos
-        subrubros_unicos = set(v.get("subrubro") for v in response.data if v.get("subrubro"))
+        subrubros_unicos = set(v.get("subrubro") for v in subrubros_data if v.get("subrubro"))
 
         # Mapear subrubros a familias confirmadas
         familias_nombres_confirmadas = set()

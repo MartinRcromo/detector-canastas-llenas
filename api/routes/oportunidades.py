@@ -6,7 +6,7 @@ VERSION SIMPLIFICADA SIN PANDAS
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
 from collections import defaultdict
-from database import get_supabase
+from database import execute_query
 from models.responses import (
     OportunidadesResponse,
     OportunidadFamilia,
@@ -43,23 +43,25 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
         Lista de productos top de esa familia
     """
     try:
-        supabase = get_supabase()
         fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
         # Obtener productos más vendidos de esta familia
-        response = supabase.table("ventas") \
-            .select("articulo_codigo, articulo_nombre, monto, cantidad") \
-            .eq("subrubro", familia) \
-            .gte("fecha", fecha_12_meses) \
-            .execute()
+        query = """
+            SELECT articulo_codigo, articulo_nombre, monto, cantidad
+            FROM ventas
+            WHERE subrubro = :familia
+            AND fecha >= :fecha_12_meses
+        """
 
-        if not response.data:
+        productos_ventas = execute_query(query, {"familia": familia, "fecha_12_meses": fecha_12_meses})
+
+        if not productos_ventas:
             return []
 
         # Agrupar por artículo usando diccionarios
         productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": ""})
 
-        for venta in response.data:
+        for venta in productos_ventas:
             codigo = venta.get("articulo_codigo")
             nombre = venta.get("articulo_nombre", "")
             cantidad = venta.get("cantidad", 0)
@@ -125,32 +127,36 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
         Lista de ProductoDestacado
     """
     try:
-        supabase = get_supabase()
         fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
         # Obtener productos más vendidos globalmente que el cliente NO compra
         # Primero obtener qué artículos compra el cliente
-        response_cliente = supabase.table("ventas") \
-            .select("articulo_codigo") \
-            .eq("cuit", cuit) \
-            .gte("fecha", fecha_12_meses) \
-            .execute()
+        query_cliente = """
+            SELECT articulo_codigo
+            FROM ventas
+            WHERE cuit = :cuit
+            AND fecha >= :fecha_12_meses
+        """
 
-        articulos_cliente = set(v.get("articulo_codigo") for v in response_cliente.data if v.get("articulo_codigo"))
+        articulos_cliente_data = execute_query(query_cliente, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+        articulos_cliente = set(v.get("articulo_codigo") for v in articulos_cliente_data if v.get("articulo_codigo"))
 
         # Obtener top productos globales
-        response_global = supabase.table("ventas") \
-            .select("articulo_codigo, articulo_nombre, subrubro, monto, cantidad") \
-            .gte("fecha", fecha_12_meses) \
-            .execute()
+        query_global = """
+            SELECT articulo_codigo, articulo_nombre, subrubro, monto, cantidad
+            FROM ventas
+            WHERE fecha >= :fecha_12_meses
+        """
 
-        if not response_global.data:
+        productos_globales = execute_query(query_global, {"fecha_12_meses": fecha_12_meses})
+
+        if not productos_globales:
             return []
 
         # Agrupar productos usando diccionarios
         productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": "", "subrubro": ""})
 
-        for venta in response_global.data:
+        for venta in productos_globales:
             codigo = venta.get("articulo_codigo")
             nombre = venta.get("articulo_nombre", "")
             subrubro = venta.get("subrubro", "")

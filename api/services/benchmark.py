@@ -6,7 +6,7 @@ VERSION SIMPLIFICADA SIN PANDAS
 from datetime import datetime, timedelta
 from typing import List, Dict
 from collections import defaultdict
-from database import get_supabase
+from database import execute_query
 
 # Empresas del grupo para análisis
 EMPRESAS_GRUPO = ["CANASATA", "SURTIHOGAR"]
@@ -29,21 +29,26 @@ def obtener_clientes_similares(
     Returns:
         Lista de CUITs de clientes similares
     """
-    supabase = get_supabase()
     fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
     # Obtener facturación del cliente objetivo
-    response_objetivo = supabase.table("ventas") \
-        .select("monto") \
-        .eq("cuit", cuit_objetivo) \
-        .gte("fecha", fecha_12_meses) \
-        .in_("empresa", EMPRESAS_GRUPO) \
-        .execute()
+    query_objetivo = """
+        SELECT monto FROM ventas
+        WHERE cuit = :cuit
+        AND fecha >= :fecha_12_meses
+        AND empresa = ANY(:empresas)
+    """
 
-    if not response_objetivo.data:
+    ventas_objetivo = execute_query(query_objetivo, {
+        "cuit": cuit_objetivo,
+        "fecha_12_meses": fecha_12_meses,
+        "empresas": EMPRESAS_GRUPO
+    })
+
+    if not ventas_objetivo:
         return []
 
-    facturacion_objetivo = sum(v.get("monto", 0) for v in response_objetivo.data)
+    facturacion_objetivo = sum(v.get("monto", 0) for v in ventas_objetivo)
 
     # Definir rango de facturación
     if facturacion_min is None:
@@ -52,19 +57,25 @@ def obtener_clientes_similares(
         facturacion_max = facturacion_objetivo * 1.3
 
     # Obtener todos los clientes y su facturación
-    response_todos = supabase.table("ventas") \
-        .select("cuit, monto") \
-        .gte("fecha", fecha_12_meses) \
-        .in_("empresa", EMPRESAS_GRUPO) \
-        .neq("cuit", cuit_objetivo) \
-        .execute()
+    query_todos = """
+        SELECT cuit, monto FROM ventas
+        WHERE fecha >= :fecha_12_meses
+        AND empresa = ANY(:empresas)
+        AND cuit != :cuit_objetivo
+    """
 
-    if not response_todos.data:
+    ventas_todos = execute_query(query_todos, {
+        "fecha_12_meses": fecha_12_meses,
+        "empresas": EMPRESAS_GRUPO,
+        "cuit_objetivo": cuit_objetivo
+    })
+
+    if not ventas_todos:
         return []
 
     # Agrupar por CUIT y calcular facturación usando diccionarios
     facturacion_por_cliente = defaultdict(float)
-    for venta in response_todos.data:
+    for venta in ventas_todos:
         cuit = venta.get("cuit")
         monto = venta.get("monto", 0)
         if cuit:
@@ -94,23 +105,28 @@ def calcular_matriz_coocurrencia(cuits: List[str]) -> Dict[str, Dict[str, int]]:
     Returns:
         Diccionario con la matriz de co-ocurrencia (subrubro -> subrubro -> count)
     """
-    supabase = get_supabase()
     fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
     # Obtener todas las compras de estos clientes
-    response = supabase.table("ventas") \
-        .select("cuit, subrubro") \
-        .in_("cuit", cuits) \
-        .gte("fecha", fecha_12_meses) \
-        .in_("empresa", EMPRESAS_GRUPO) \
-        .execute()
+    query = """
+        SELECT cuit, subrubro FROM ventas
+        WHERE cuit = ANY(:cuits)
+        AND fecha >= :fecha_12_meses
+        AND empresa = ANY(:empresas)
+    """
 
-    if not response.data:
+    ventas_data = execute_query(query, {
+        "cuits": cuits,
+        "fecha_12_meses": fecha_12_meses,
+        "empresas": EMPRESAS_GRUPO
+    })
+
+    if not ventas_data:
         return {}
 
     # Obtener subrubros únicos por cliente
     subrubros_por_cliente = defaultdict(set)
-    for venta in response.data:
+    for venta in ventas_data:
         cuit = venta.get("cuit")
         subrubro = venta.get("subrubro")
         if cuit and subrubro:
@@ -151,21 +167,26 @@ def identificar_oportunidades(
             "coocurrencia": int
         }
     """
-    supabase = get_supabase()
     fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
     # 1. Obtener subrubros que el cliente YA compra
-    response_cliente = supabase.table("ventas") \
-        .select("subrubro") \
-        .eq("cuit", cuit_objetivo) \
-        .gte("fecha", fecha_12_meses) \
-        .in_("empresa", EMPRESAS_GRUPO) \
-        .execute()
+    query_cliente = """
+        SELECT subrubro FROM ventas
+        WHERE cuit = :cuit
+        AND fecha >= :fecha_12_meses
+        AND empresa = ANY(:empresas)
+    """
 
-    if not response_cliente.data:
+    subrubros_data = execute_query(query_cliente, {
+        "cuit": cuit_objetivo,
+        "fecha_12_meses": fecha_12_meses,
+        "empresas": EMPRESAS_GRUPO
+    })
+
+    if not subrubros_data:
         return []
 
-    subrubros_cliente = set(v.get("subrubro") for v in response_cliente.data if v.get("subrubro"))
+    subrubros_cliente = set(v.get("subrubro") for v in subrubros_data if v.get("subrubro"))
 
     # 2. Encontrar clientes similares
     clientes_similares = obtener_clientes_similares(cuit_objetivo)
@@ -248,24 +269,30 @@ def estimar_potencial_familia(
     if not clientes_similares:
         return 0.0
 
-    supabase = get_supabase()
     fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
     # Obtener ventas de esta familia para clientes similares
-    response = supabase.table("ventas") \
-        .select("cuit, monto") \
-        .eq("subrubro", familia) \
-        .in_("cuit", clientes_similares) \
-        .gte("fecha", fecha_12_meses) \
-        .in_("empresa", EMPRESAS_GRUPO) \
-        .execute()
+    query = """
+        SELECT cuit, monto FROM ventas
+        WHERE subrubro = :familia
+        AND cuit = ANY(:cuits)
+        AND fecha >= :fecha_12_meses
+        AND empresa = ANY(:empresas)
+    """
 
-    if not response.data:
+    ventas_familia = execute_query(query, {
+        "familia": familia,
+        "cuits": clientes_similares,
+        "fecha_12_meses": fecha_12_meses,
+        "empresas": EMPRESAS_GRUPO
+    })
+
+    if not ventas_familia:
         return 100000.0  # Default si no hay datos
 
     # Calcular totales usando diccionarios
-    facturacion_total = sum(v.get("monto", 0) for v in response.data)
-    cuits_unicos = set(v.get("cuit") for v in response.data if v.get("cuit"))
+    facturacion_total = sum(v.get("monto", 0) for v in ventas_familia)
+    cuits_unicos = set(v.get("cuit") for v in ventas_familia if v.get("cuit"))
     cantidad_clientes = len(cuits_unicos)
 
     if cantidad_clientes == 0:
