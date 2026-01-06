@@ -70,17 +70,17 @@ async def get_portfolio(cuit: str):
     3. Retorna las familias no confirmadas como "disponibles"
     """
     try:
-        # Calcular fecha de hace 12 meses
-        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        # Calcular anio_mes de hace 12 meses
+        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
         # Obtener subrubros únicos del cliente
         query = """
             SELECT subrubro FROM ventas
             WHERE cuit = :cuit
-            AND fecha >= :fecha_12_meses
+            AND anio_mes >= :anio_mes_12_meses
         """
 
-        subrubros_data = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+        subrubros_data = execute_query(query, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
 
         if not subrubros_data:
             # Cliente sin compras recientes - todas las familias están disponibles
