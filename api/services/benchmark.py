@@ -29,19 +29,19 @@ def obtener_clientes_similares(
     Returns:
         Lista de CUITs de clientes similares
     """
-    fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # Obtener facturación del cliente objetivo
     query_objetivo = """
         SELECT importe FROM ventas
         WHERE cuit = :cuit
-        AND fecha >= :fecha_12_meses
+        AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
     """
 
     ventas_objetivo = execute_query(query_objetivo, {
         "cuit": cuit_objetivo,
-        "fecha_12_meses": fecha_12_meses,
+        "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
@@ -59,13 +59,13 @@ def obtener_clientes_similares(
     # Obtener todos los clientes y su facturación
     query_todos = """
         SELECT cuit, importe FROM ventas
-        WHERE fecha >= :fecha_12_meses
+        WHERE anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
         AND cuit != :cuit_objetivo
     """
 
     ventas_todos = execute_query(query_todos, {
-        "fecha_12_meses": fecha_12_meses,
+        "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO,
         "cuit_objetivo": cuit_objetivo
     })
@@ -105,19 +105,19 @@ def calcular_matriz_coocurrencia(cuits: List[str]) -> Dict[str, Dict[str, int]]:
     Returns:
         Diccionario con la matriz de co-ocurrencia (subrubro -> subrubro -> count)
     """
-    fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # Obtener todas las compras de estos clientes
     query = """
         SELECT cuit, subrubro FROM ventas
         WHERE cuit = ANY(:cuits)
-        AND fecha >= :fecha_12_meses
+        AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
     """
 
     ventas_data = execute_query(query, {
         "cuits": cuits,
-        "fecha_12_meses": fecha_12_meses,
+        "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
@@ -167,19 +167,19 @@ def identificar_oportunidades(
             "coocurrencia": int
         }
     """
-    fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # 1. Obtener subrubros que el cliente YA compra
     query_cliente = """
         SELECT subrubro FROM ventas
         WHERE cuit = :cuit
-        AND fecha >= :fecha_12_meses
+        AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
     """
 
     subrubros_data = execute_query(query_cliente, {
         "cuit": cuit_objetivo,
-        "fecha_12_meses": fecha_12_meses,
+        "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
@@ -269,21 +269,21 @@ def estimar_potencial_familia(
     if not clientes_similares:
         return 0.0
 
-    fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # Obtener ventas de esta familia para clientes similares
     query = """
         SELECT cuit, importe FROM ventas
         WHERE subrubro = :familia
         AND cuit = ANY(:cuits)
-        AND fecha >= :fecha_12_meses
+        AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
     """
 
     ventas_familia = execute_query(query, {
         "familia": familia,
         "cuits": clientes_similares,
-        "fecha_12_meses": fecha_12_meses,
+        "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 

@@ -124,17 +124,17 @@ async def get_planes(cuit: str):
     - Beneficios de cada tier
     """
     try:
-        # Calcular fecha de hace 12 meses
-        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        # Calcular anio_mes de hace 12 meses
+        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
         # Obtener facturación anual del cliente
         query = """
             SELECT importe FROM ventas
             WHERE cuit = :cuit
-            AND fecha >= :fecha_12_meses
+            AND anio_mes >= :anio_mes_12_meses
         """
 
-        ventas_data = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+        ventas_data = execute_query(query, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
 
         if not ventas_data:
             # Cliente sin datos - asignar tier Bronze por defecto

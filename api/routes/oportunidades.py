@@ -43,32 +43,32 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
         Lista de productos top de esa familia
     """
     try:
-        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
         # Obtener productos más vendidos de esta familia
         query = """
-            SELECT articulo_codigo, articulo_nombre, importe, cantidad
+            SELECT articulo_codigo, articulo_descripcion, importe, unidades
             FROM ventas
             WHERE subrubro = :familia
-            AND fecha >= :fecha_12_meses
+            AND anio_mes >= :anio_mes_12_meses
         """
 
-        productos_ventas = execute_query(query, {"familia": familia, "fecha_12_meses": fecha_12_meses})
+        productos_ventas = execute_query(query, {"familia": familia, "anio_mes_12_meses": anio_mes_12_meses})
 
         if not productos_ventas:
             return []
 
         # Agrupar por artículo usando diccionarios
-        productos_dict = defaultdict(lambda: {"cantidad": 0, "importe": 0, "nombre": ""})
+        productos_dict = defaultdict(lambda: {"unidades": 0, "importe": 0, "nombre": ""})
 
         for venta in productos_ventas:
             codigo = venta.get("articulo_codigo")
-            nombre = venta.get("articulo_nombre", "")
-            cantidad = venta.get("cantidad", 0)
+            nombre = venta.get("articulo_descripcion", "")
+            unidades = venta.get("unidades", 0)
             importe = venta.get("importe", 0)
 
             if codigo:
-                productos_dict[codigo]["cantidad"] += cantidad
+                productos_dict[codigo]["unidades"] += unidades
                 productos_dict[codigo]["importe"] += importe
                 if not productos_dict[codigo]["nombre"]:
                     productos_dict[codigo]["nombre"] = nombre
@@ -78,7 +78,7 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
             {
                 "codigo": codigo,
                 "nombre": datos["nombre"],
-                "cantidad": datos["cantidad"],
+                "unidades": datos["unidades"],
                 "importe": datos["importe"]
             }
             for codigo, datos in productos_dict.items()
@@ -91,12 +91,12 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
         productos = []
         for producto in productos_top:
             # Calcular precio promedio
-            precio = producto["importe"] / producto["cantidad"] if producto["cantidad"] > 0 else 0
+            precio = producto["importe"] / producto["unidades"] if producto["unidades"] > 0 else 0
 
-            # Determinar demanda basada en cantidad vendida
-            if producto["cantidad"] >= 100:
+            # Determinar demanda basada en unidades vendidas
+            if producto["unidades"] >= 100:
                 demanda = "Alta"
-            elif producto["cantidad"] >= 50:
+            elif producto["unidades"] >= 50:
                 demanda = "Media"
             else:
                 demanda = "Baja"
@@ -127,7 +127,7 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
         Lista de ProductoDestacado
     """
     try:
-        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
         # Obtener productos más vendidos globalmente que el cliente NO compra
         # Primero obtener qué artículos compra el cliente
@@ -135,37 +135,37 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
             SELECT articulo_codigo
             FROM ventas
             WHERE cuit = :cuit
-            AND fecha >= :fecha_12_meses
+            AND anio_mes >= :anio_mes_12_meses
         """
 
-        articulos_cliente_data = execute_query(query_cliente, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+        articulos_cliente_data = execute_query(query_cliente, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
         articulos_cliente = set(v.get("articulo_codigo") for v in articulos_cliente_data if v.get("articulo_codigo"))
 
         # Obtener top productos globales
         query_global = """
-            SELECT articulo_codigo, articulo_nombre, subrubro, importe, cantidad
+            SELECT articulo_codigo, articulo_descripcion, subrubro, importe, unidades
             FROM ventas
-            WHERE fecha >= :fecha_12_meses
+            WHERE anio_mes >= :anio_mes_12_meses
         """
 
-        productos_globales = execute_query(query_global, {"fecha_12_meses": fecha_12_meses})
+        productos_globales = execute_query(query_global, {"anio_mes_12_meses": anio_mes_12_meses})
 
         if not productos_globales:
             return []
 
         # Agrupar productos usando diccionarios
-        productos_dict = defaultdict(lambda: {"cantidad": 0, "importe": 0, "nombre": "", "subrubro": ""})
+        productos_dict = defaultdict(lambda: {"unidades": 0, "importe": 0, "nombre": "", "subrubro": ""})
 
         for venta in productos_globales:
             codigo = venta.get("articulo_codigo")
-            nombre = venta.get("articulo_nombre", "")
+            nombre = venta.get("articulo_descripcion", "")
             subrubro = venta.get("subrubro", "")
-            cantidad = venta.get("cantidad", 0)
+            unidades = venta.get("unidades", 0)
             importe = venta.get("importe", 0)
 
             # Filtrar productos que el cliente YA tiene
             if codigo and codigo not in articulos_cliente:
-                productos_dict[codigo]["cantidad"] += cantidad
+                productos_dict[codigo]["unidades"] += unidades
                 productos_dict[codigo]["importe"] += importe
                 if not productos_dict[codigo]["nombre"]:
                     productos_dict[codigo]["nombre"] = nombre
@@ -178,9 +178,9 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
                 "codigo": codigo,
                 "nombre": datos["nombre"],
                 "subrubro": datos["subrubro"],
-                "cantidad": datos["cantidad"],
+                "unidades": datos["unidades"],
                 "importe": datos["importe"],
-                "precio": datos["importe"] / datos["cantidad"] if datos["cantidad"] > 0 else 0
+                "precio": datos["importe"] / datos["unidades"] if datos["unidades"] > 0 else 0
             }
             for codigo, datos in productos_dict.items()
         ]
@@ -199,9 +199,9 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
 
         for idx, producto in enumerate(productos_top):
             # Determinar rotación
-            if producto["cantidad"] >= 100:
+            if producto["unidades"] >= 100:
                 rotacion = "Muy Alta"
-            elif producto["cantidad"] >= 50:
+            elif producto["unidades"] >= 50:
                 rotacion = "Alta"
             else:
                 rotacion = "Media"
