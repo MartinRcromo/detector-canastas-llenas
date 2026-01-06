@@ -197,3 +197,20 @@ def test_perfil_debug(cuit: str):
             "tipo": str(type(e).__name__),
             "traceback": traceback.format_exc()
         }
+
+@app.get("/api/test/perfil-full/{cuit}")
+async def test_perfil_full(cuit: str):
+    """Test completo del endpoint de perfil con debug detallado"""
+    from routes.perfil import get_perfil
+    import traceback
+
+    try:
+        result = await get_perfil(cuit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "tipo": str(type(e).__name__),
+            "traceback": traceback.format_exc()
+        }
