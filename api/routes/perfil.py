@@ -56,7 +56,7 @@ async def get_perfil(cuit: str):
 
         # Calcular métricas agregadas
         facturacion_anual = sum(v.get("importe", 0) for v in ventas)
-        unidades_compradas = sum(v.get("unidades", 0) for v in ventas)
+        unidades_compradas = int(sum(v.get("unidades", 0) for v in ventas))
 
         # Contar pedidos únicos (por anio_mes + empresa)
         pedidos_unicos = len(set(f"{v.get('anio_mes')}_{v.get('empresa')}" for v in ventas))
@@ -74,8 +74,8 @@ async def get_perfil(cuit: str):
                 fecha=venta.get("anio_mes", ""),
                 codigo_articulo=venta.get("articulo_codigo", ""),
                 nombre_articulo=venta.get("articulo_descripcion", "Producto sin nombre"),
-                cantidad=venta.get("unidades", 0),
-                monto=venta.get("importe", 0.0),
+                cantidad=int(venta.get("unidades", 0) or 0),
+                monto=float(venta.get("importe", 0) or 0),
                 subrubro=venta.get("subrubro", "Sin clasificar")
             ))
 
