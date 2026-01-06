@@ -73,16 +73,17 @@ async def get_portfolio(cuit: str):
         # Calcular anio_mes de hace 12 meses
         anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
-        # Obtener subrubros únicos del cliente
+        # Obtener rubros únicos del cliente (usamos rubro en lugar de subrubro)
         query = """
-            SELECT subrubro FROM ventas
+            SELECT DISTINCT rubro FROM ventas
             WHERE cuit = :cuit
             AND anio_mes >= :anio_mes_12_meses
+            AND rubro IS NOT NULL
         """
 
-        subrubros_data = execute_query(query, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
+        rubros_data = execute_query(query, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
 
-        if not subrubros_data:
+        if not rubros_data:
             # Cliente sin compras recientes - todas las familias están disponibles
             familias_disponibles = [
                 FamiliaDisponible(id=f["id"], nombre=f["nombre"], icono=f["icono"])
@@ -96,14 +97,11 @@ async def get_portfolio(cuit: str):
                 porcentaje_completado=0.0
             )
 
-        # Obtener subrubros únicos
-        subrubros_unicos = set(v.get("subrubro") for v in subrubros_data if v.get("subrubro"))
+        # Obtener rubros únicos
+        rubros_unicos = set(v.get("rubro") for v in rubros_data if v.get("rubro"))
 
-        # Mapear subrubros a familias confirmadas
-        familias_nombres_confirmadas = set()
-        for subrubro in subrubros_unicos:
-            familia = SUBRUBRO_A_FAMILIA.get(subrubro, subrubro)
-            familias_nombres_confirmadas.add(familia)
+        # Los rubros son las familias confirmadas
+        familias_nombres_confirmadas = rubros_unicos
 
         # Construir lista de familias confirmadas
         familias_confirmadas = []
