@@ -1,303 +1,364 @@
 """
-Servicio de benchmark y análisis de co-ocurrencia
-Identifica oportunidades de cross-selling basado en clientes similares
-Implementación optimizada con Python nativo y SQL
+Servicio de benchmark para análisis de oportunidades
+Implementa la metodología Benchmark de Antigravity
 """
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 from collections import defaultdict
 from database import execute_query
+import statistics
 
 # Empresas del grupo para análisis
 EMPRESAS_GRUPO = ["Cromo", "BBA"]
 
-def obtener_clientes_similares(
-    cuit_objetivo: str,
-    facturacion_min: float = None,
-    facturacion_max: float = None,
-    top_n: int = 50
-) -> List[str]:
+
+def obtener_cluster_cliente(cuit: str) -> Optional[Dict]:
     """
-    Encuentra clientes similares al objetivo basado en facturación
+    Lee el cluster de un cliente desde cliente_cluster_v2
 
     Args:
-        cuit_objetivo: CUIT del cliente a analizar
-        facturacion_min: Facturación mínima del rango (si None, usa 70% del cliente)
-        facturacion_max: Facturación máxima del rango (si None, usa 130% del cliente)
-        top_n: Cantidad máxima de clientes similares a retornar
+        cuit: CUIT del cliente
 
     Returns:
-        Lista de CUITs de clientes similares
+        Dict con cluster_mix, cluster_especial, top1_rubro, top1_share
+        None si no existe
+    """
+    query = """
+        SELECT
+            cluster_mix,
+            cluster_especial,
+            top1_rubro,
+            top1_share
+        FROM cliente_cluster_v2
+        WHERE cuit = :cuit
+        LIMIT 1
+    """
+
+    result = execute_query(query, {"cuit": cuit})
+
+    if not result:
+        return None
+
+    cluster = result[0]
+    return {
+        "cluster_mix": cluster["cluster_mix"],
+        "cluster_especial": cluster["cluster_especial"],
+        "top1_rubro": cluster["top1_rubro"],
+        "top1_share": float(cluster.get("top1_share", 0) or 0)
+    }
+
+
+def calcular_top1_subrubro_real(cuit: str) -> Optional[str]:
+    """
+    Calcula el top1 subrubro del cliente basado en ventas reales de últimos 12 meses
+
+    Args:
+        cuit: CUIT del cliente
+
+    Returns:
+        Nombre del subrubro con mayor facturación o None
     """
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
-    # Obtener facturación del cliente objetivo
-    query_objetivo = """
-        SELECT importe FROM ventas
+    query = """
+        SELECT subrubro, SUM(importe) as total
+        FROM ventas
         WHERE cuit = :cuit
         AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
+        AND subrubro IS NOT NULL
+        GROUP BY subrubro
+        ORDER BY total DESC
+        LIMIT 1
     """
 
-    ventas_objetivo = execute_query(query_objetivo, {
-        "cuit": cuit_objetivo,
+    result = execute_query(query, {
+        "cuit": cuit,
         "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
-    if not ventas_objetivo:
-        return []
+    return result[0]["subrubro"] if result else None
 
-    facturacion_objetivo = float(sum(v.get("importe", 0) for v in ventas_objetivo))
 
-    # Definir rango de facturación
-    if facturacion_min is None:
-        facturacion_min = facturacion_objetivo * 0.7
-    if facturacion_max is None:
-        facturacion_max = facturacion_objetivo * 1.3
-
-    # Obtener todos los clientes y su facturación
-    query_todos = """
-        SELECT cuit, importe FROM ventas
-        WHERE anio_mes >= :anio_mes_12_meses
-        AND empresa = ANY(:empresas)
-        AND cuit != :cuit_objetivo
+def obtener_lideres_benchmark(
+    cluster_mix: str,
+    cluster_especial: str,
+    top1_subrubro: str,
+    min_pares: int = 5
+) -> List[str]:
     """
+    Identifica los líderes del micro-segmento (Top 25%)
 
-    ventas_todos = execute_query(query_todos, {
-        "anio_mes_12_meses": anio_mes_12_meses,
-        "empresas": EMPRESAS_GRUPO,
-        "cuit_objetivo": cuit_objetivo
-    })
-
-    if not ventas_todos:
-        return []
-
-    # Agrupar por CUIT y calcular facturación usando diccionarios
-    facturacion_por_cliente = defaultdict(float)
-    for venta in ventas_todos:
-        cuit = venta.get("cuit")
-        importe = venta.get("importe", 0)
-        if cuit:
-            facturacion_por_cliente[cuit] += importe
-
-    # Filtrar por rango de facturación
-    clientes_en_rango = []
-    for cuit, facturacion in facturacion_por_cliente.items():
-        if facturacion_min <= facturacion <= facturacion_max:
-            diferencia = abs(facturacion - facturacion_objetivo)
-            clientes_en_rango.append((cuit, facturacion, diferencia))
-
-    # Ordenar por similitud (menor diferencia primero) y tomar top_n
-    clientes_en_rango.sort(key=lambda x: x[2])
-    clientes_similares = [cuit for cuit, _, _ in clientes_en_rango[:top_n]]
-
-    return clientes_similares
-
-
-def calcular_matriz_coocurrencia(cuits: List[str]) -> Dict[str, Dict[str, int]]:
-    """
-    Calcula la matriz de co-ocurrencia de subrubros para un conjunto de clientes
+    Proceso:
+    1. Busca clientes con mismo perfil (mix + especial + top1)
+    2. Si < min_pares, relaja búsqueda (solo mix + especial)
+    3. Calcula P75 de facturación del segmento
+    4. Retorna CUITs con facturación >= P75
 
     Args:
-        cuits: Lista de CUITs a analizar
+        cluster_mix: Tipo de cluster (ESPECIALISTA_PURO, etc.)
+        cluster_especial: Rubro principal
+        top1_subrubro: Subrubro principal
+        min_pares: Mínimo de pares para considerar válido el micro-segmento
 
     Returns:
-        Diccionario con la matriz de co-ocurrencia (subrubro -> subrubro -> count)
+        Lista de CUITs de los líderes
     """
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
-    # Obtener todas las compras de estos clientes
-    query = """
-        SELECT cuit, subrubro FROM ventas
-        WHERE cuit = ANY(:cuits)
-        AND anio_mes >= :anio_mes_12_meses
-        AND empresa = ANY(:empresas)
+    # PASO 1: Intentar con criterio estricto (mix + especial + top1)
+    query_estricto = """
+        WITH clientes_segmento AS (
+            SELECT DISTINCT c.cuit
+            FROM cliente_cluster_v2 c
+            WHERE c.cluster_mix = :cluster_mix
+            AND c.cluster_especial = :cluster_especial
+            AND c.top1_rubro = :top1_subrubro
+        )
+        SELECT
+            cs.cuit,
+            SUM(v.importe) as facturacion_total
+        FROM clientes_segmento cs
+        JOIN ventas v ON v.cuit = cs.cuit
+        WHERE v.anio_mes >= :anio_mes_12_meses
+        AND v.empresa = ANY(:empresas)
+        GROUP BY cs.cuit
+        HAVING SUM(v.importe) > 0
     """
 
-    ventas_data = execute_query(query, {
-        "cuits": cuits,
+    clientes_segmento = execute_query(query_estricto, {
+        "cluster_mix": cluster_mix,
+        "cluster_especial": cluster_especial,
+        "top1_subrubro": top1_subrubro,
         "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
-    if not ventas_data:
+    # PASO 2: Si no hay suficientes pares, relajar búsqueda (solo mix + especial)
+    if len(clientes_segmento) < min_pares:
+        query_relajado = """
+            WITH clientes_segmento AS (
+                SELECT DISTINCT c.cuit
+                FROM cliente_cluster_v2 c
+                WHERE c.cluster_mix = :cluster_mix
+                AND c.cluster_especial = :cluster_especial
+            )
+            SELECT
+                cs.cuit,
+                SUM(v.importe) as facturacion_total
+            FROM clientes_segmento cs
+            JOIN ventas v ON v.cuit = cs.cuit
+            WHERE v.anio_mes >= :anio_mes_12_meses
+            AND v.empresa = ANY(:empresas)
+            GROUP BY cs.cuit
+            HAVING SUM(v.importe) > 0
+        """
+
+        clientes_segmento = execute_query(query_relajado, {
+            "cluster_mix": cluster_mix,
+            "cluster_especial": cluster_especial,
+            "anio_mes_12_meses": anio_mes_12_meses,
+            "empresas": EMPRESAS_GRUPO
+        })
+
+    if not clientes_segmento:
+        return []
+
+    # PASO 3: Calcular percentil 75 (P75)
+    facturaciones = [float(c["facturacion_total"] or 0) for c in clientes_segmento]
+
+    if not facturaciones:
+        return []
+
+    p75 = statistics.quantiles(facturaciones, n=4)[2]  # P75 = cuartil 3
+
+    # PASO 4: Filtrar líderes (facturación >= P75)
+    lideres = [
+        c["cuit"]
+        for c in clientes_segmento
+        if float(c["facturacion_total"] or 0) >= p75
+    ]
+
+    return lideres
+
+
+def calcular_canasta_ideal(cuits_lideres: List[str]) -> Dict[str, float]:
+    """
+    Calcula la canasta ideal del segmento (Basket Share)
+
+    Proceso:
+    1. Suma todas las ventas de los líderes por subrubro
+    2. Calcula el % share de cada subrubro sobre el total
+    3. Este % representa la "canasta ideal"
+
+    Args:
+        cuits_lideres: Lista de CUITs de los líderes
+
+    Returns:
+        Dict {subrubro: share_porcentaje}
+    """
+    if not cuits_lideres:
         return {}
 
-    # Obtener subrubros únicos por cliente
-    subrubros_por_cliente = defaultdict(set)
-    for venta in ventas_data:
-        cuit = venta.get("cuit")
-        subrubro = venta.get("subrubro")
-        if cuit and subrubro:
-            subrubros_por_cliente[cuit].add(subrubro)
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
-    # Calcular co-ocurrencias
-    matriz = defaultdict(lambda: defaultdict(int))
+    query = """
+        SELECT
+            subrubro,
+            SUM(importe) as total_subrubro
+        FROM ventas
+        WHERE cuit = ANY(:cuits)
+        AND anio_mes >= :anio_mes_12_meses
+        AND empresa = ANY(:empresas)
+        AND subrubro IS NOT NULL
+        GROUP BY subrubro
+    """
 
-    for cuit, subrubros in subrubros_por_cliente.items():
-        subrubros_lista = list(subrubros)
-        for i, sub1 in enumerate(subrubros_lista):
-            for sub2 in subrubros_lista[i+1:]:
-                matriz[sub1][sub2] += 1
-                matriz[sub2][sub1] += 1
+    ventas_lideres = execute_query(query, {
+        "cuits": cuits_lideres,
+        "anio_mes_12_meses": anio_mes_12_meses,
+        "empresas": EMPRESAS_GRUPO
+    })
 
-    return dict(matriz)
+    if not ventas_lideres:
+        return {}
+
+    # Calcular total general
+    total_general = sum(float(v["total_subrubro"] or 0) for v in ventas_lideres)
+
+    if total_general == 0:
+        return {}
+
+    # Calcular share % de cada subrubro
+    canasta_ideal = {}
+    for venta in ventas_lideres:
+        subrubro = venta["subrubro"]
+        total_subrubro = float(venta["total_subrubro"] or 0)
+        share_porcentaje = (total_subrubro / total_general) * 100
+        canasta_ideal[subrubro] = round(share_porcentaje, 2)
+
+    return canasta_ideal
 
 
 def identificar_oportunidades(
     cuit_objetivo: str,
-    min_coocurrencia: int = 5,
-    top_familias: int = 4
+    min_gap_porcentaje: float = 20.0,
+    top_oportunidades: int = 10
 ) -> List[Dict]:
     """
-    Identifica oportunidades de cross-selling para un cliente
+    Identifica oportunidades de cross-selling usando metodología Benchmark
+
+    Proceso:
+    1. Obtiene cluster del cliente
+    2. Identifica líderes del micro-segmento
+    3. Calcula canasta ideal de los líderes
+    4. Obtiene ventas reales del cliente
+    5. Gap Analysis:
+       - importe_ideal = venta_total_cliente × (share_ideal / 100)
+       - gap = importe_ideal - importe_real
+       - gap_% = (gap / importe_ideal) × 100
+    6. Filtra oportunidades con gap >= min_gap_porcentaje
+    7. Ordena por gap $ descendente
 
     Args:
         cuit_objetivo: CUIT del cliente
-        min_coocurrencia: Mínima co-ocurrencia para considerar una oportunidad
-        top_familias: Cantidad de familias top a retornar
+        min_gap_porcentaje: % mínimo de gap para considerar oportunidad
+        top_oportunidades: Cantidad máxima de oportunidades a retornar
 
     Returns:
         Lista de oportunidades con formato:
         {
-            "familia": str,
-            "razon": str,
-            "score": float,
-            "coocurrencia": int
+            "subrubro": str,
+            "importe_ideal": float,
+            "importe_real": float,
+            "gap_importe": float,
+            "gap_porcentaje": float,
+            "share_ideal": float
         }
     """
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
-    # 1. Obtener subrubros que el cliente YA compra
+    # PASO 1: Obtener cluster del cliente
+    cluster = obtener_cluster_cliente(cuit_objetivo)
+
+    if not cluster:
+        return []
+
+    # PASO 2: Obtener líderes del micro-segmento
+    lideres = obtener_lideres_benchmark(
+        cluster_mix=cluster["cluster_mix"],
+        cluster_especial=cluster["cluster_especial"],
+        top1_subrubro=cluster["top1_rubro"]
+    )
+
+    if not lideres:
+        return []
+
+    # PASO 3: Calcular canasta ideal
+    canasta_ideal = calcular_canasta_ideal(lideres)
+
+    if not canasta_ideal:
+        return []
+
+    # PASO 4: Obtener ventas reales del cliente
     query_cliente = """
-        SELECT subrubro FROM ventas
+        SELECT subrubro, SUM(importe) as total
+        FROM ventas
         WHERE cuit = :cuit
         AND anio_mes >= :anio_mes_12_meses
         AND empresa = ANY(:empresas)
+        AND subrubro IS NOT NULL
+        GROUP BY subrubro
     """
 
-    subrubros_data = execute_query(query_cliente, {
+    ventas_cliente = execute_query(query_cliente, {
         "cuit": cuit_objetivo,
         "anio_mes_12_meses": anio_mes_12_meses,
         "empresas": EMPRESAS_GRUPO
     })
 
-    if not subrubros_data:
+    # Convertir a dict para lookup rápido
+    ventas_reales = {
+        v["subrubro"]: float(v["total"] or 0)
+        for v in ventas_cliente
+    }
+
+    # Calcular facturación total del cliente
+    total_cliente = sum(ventas_reales.values())
+
+    if total_cliente == 0:
         return []
 
-    subrubros_cliente = set(v.get("subrubro") for v in subrubros_data if v.get("subrubro"))
-
-    # 2. Encontrar clientes similares
-    clientes_similares = obtener_clientes_similares(cuit_objetivo)
-
-    if not clientes_similares:
-        return []
-
-    # 3. Calcular matriz de co-ocurrencia
-    matriz = calcular_matriz_coocurrencia(clientes_similares)
-
-    if not matriz:
-        return []
-
-    # 4. Identificar subrubros que el cliente NO tiene pero co-ocurren con los que sí tiene
+    # PASO 5: Gap Analysis
     oportunidades = []
 
-    for subrubro_tiene in subrubros_cliente:
-        if subrubro_tiene not in matriz:
-            continue
+    for subrubro, share_ideal in canasta_ideal.items():
+        # Importe ideal = facturación total × (share ideal / 100)
+        importe_ideal = total_cliente * (share_ideal / 100)
 
-        # Obtener co-ocurrencias con subrubros que el cliente NO tiene
-        coocurrencias = matriz[subrubro_tiene]
-        for subrubro_oportunidad, count in coocurrencias.items():
-            if subrubro_oportunidad not in subrubros_cliente and count >= min_coocurrencia:
-                oportunidades.append({
-                    "familia": subrubro_oportunidad,
-                    "razon": f"Clientes similares que compran {subrubro_tiene} también compran esto",
-                    "score": float(count),
-                    "coocurrencia": int(count)
-                })
+        # Importe real que tiene actualmente
+        importe_real = ventas_reales.get(subrubro, 0.0)
 
-    # 5. Agrupar por familia, sumar scores y ordenar
-    if not oportunidades:
-        return []
+        # Gap
+        gap_importe = importe_ideal - importe_real
 
-    # Agrupar manualmente por familia
-    familias_agrupadas = defaultdict(lambda: {"score": 0, "coocurrencia": 0, "razon": ""})
+        # Gap %
+        gap_porcentaje = (gap_importe / importe_ideal) * 100 if importe_ideal > 0 else 0
 
-    for opp in oportunidades:
-        familia = opp["familia"]
-        familias_agrupadas[familia]["score"] += opp["score"]
-        familias_agrupadas[familia]["coocurrencia"] = max(
-            familias_agrupadas[familia]["coocurrencia"],
-            opp["coocurrencia"]
-        )
-        if not familias_agrupadas[familia]["razon"]:
-            familias_agrupadas[familia]["razon"] = opp["razon"]
+        # PASO 6: Filtrar solo oportunidades significativas
+        if gap_importe > 0 and gap_porcentaje >= min_gap_porcentaje:
+            oportunidades.append({
+                "subrubro": subrubro,
+                "importe_ideal": round(importe_ideal, 2),
+                "importe_real": round(importe_real, 2),
+                "gap_importe": round(gap_importe, 2),
+                "gap_porcentaje": round(gap_porcentaje, 2),
+                "share_ideal": share_ideal,
+                "cantidad_lideres": len(lideres)
+            })
 
-    # Convertir a lista y ordenar por score
-    resultado = [
-        {
-            "familia": familia,
-            "score": datos["score"],
-            "coocurrencia": datos["coocurrencia"],
-            "razon": datos["razon"]
-        }
-        for familia, datos in familias_agrupadas.items()
-    ]
+    # PASO 7: Ordenar por gap $ descendente y tomar top N
+    oportunidades.sort(key=lambda x: x["gap_importe"], reverse=True)
 
-    # Ordenar por score descendente y tomar top_familias
-    resultado.sort(key=lambda x: x["score"], reverse=True)
-    return resultado[:top_familias]
-
-
-def estimar_potencial_familia(
-    familia: str,
-    clientes_similares: List[str]
-) -> float:
-    """
-    Estima el potencial de facturación mensual para una familia
-    basado en el promedio de clientes similares
-
-    Args:
-        familia: Nombre de la familia/subrubro
-        clientes_similares: Lista de CUITs de clientes similares
-
-    Returns:
-        Potencial mensual estimado en pesos
-    """
-    if not clientes_similares:
-        return 0.0
-
-    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
-
-    # Obtener ventas de esta familia para clientes similares
-    query = """
-        SELECT cuit, importe FROM ventas
-        WHERE subrubro = :familia
-        AND cuit = ANY(:cuits)
-        AND anio_mes >= :anio_mes_12_meses
-        AND empresa = ANY(:empresas)
-    """
-
-    ventas_familia = execute_query(query, {
-        "familia": familia,
-        "cuits": clientes_similares,
-        "anio_mes_12_meses": anio_mes_12_meses,
-        "empresas": EMPRESAS_GRUPO
-    })
-
-    if not ventas_familia:
-        return 100000.0  # Default si no hay datos
-
-    # Calcular totales usando diccionarios
-    facturacion_total = float(sum(v.get("importe", 0) for v in ventas_familia))
-    cuits_unicos = set(v.get("cuit") for v in ventas_familia if v.get("cuit"))
-    cantidad_clientes = len(cuits_unicos)
-
-    if cantidad_clientes == 0:
-        return 100000.0
-
-    # Promedio anual por cliente / 12 para mensual
-    promedio_anual = facturacion_total / cantidad_clientes
-    return promedio_anual / 12
+    return oportunidades[:top_oportunidades]

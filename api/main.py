@@ -8,7 +8,7 @@ from datetime import datetime
 import os
 
 # Importar routers
-from routes import perfil, portfolio, oportunidades, planes
+from routes import perfil, portfolio, oportunidades, planes, cluster
 
 # Crear aplicación FastAPI
 app = FastAPI(
@@ -49,6 +49,7 @@ app.include_router(perfil.router, tags=["Perfil"])
 app.include_router(portfolio.router, tags=["Portfolio"])
 app.include_router(oportunidades.router, tags=["Oportunidades"])
 app.include_router(planes.router, tags=["Planes"])
+app.include_router(cluster.router, tags=["Cluster"])
 
 # Root endpoint
 @app.get("/")
