@@ -115,3 +115,55 @@ def test_estructura_tabla():
         return {"columnas": result}
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/test/empresas")
+def test_list_empresas():
+    """Lista todas las empresas únicas en la tabla ventas"""
+    from database import execute_query
+
+    query = """
+        SELECT
+            empresa,
+            COUNT(*) as total_registros,
+            COUNT(DISTINCT cuit) as total_clientes,
+            SUM(importe) as total_importe
+        FROM public.ventas
+        GROUP BY empresa
+        ORDER BY total_registros DESC
+    """
+
+    try:
+        result = execute_query(query)
+        return {
+            "total_empresas_encontradas": len(result),
+            "empresas": result
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/test/clientes-sin-filtro")
+def test_list_all_clientes():
+    """Lista los primeros 20 clientes SIN filtrar por empresa"""
+    from database import execute_query
+
+    query = """
+        SELECT
+            empresa,
+            cuit,
+            cliente,
+            COUNT(*) as cantidad_registros,
+            SUM(importe) as total_importe
+        FROM public.ventas
+        GROUP BY empresa, cuit, cliente
+        ORDER BY total_importe DESC
+        LIMIT 20
+    """
+
+    try:
+        result = execute_query(query)
+        return {
+            "total_encontrados": len(result),
+            "clientes": result
+        }
+    except Exception as e:
+        return {"error": str(e)}
