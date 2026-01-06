@@ -232,3 +232,46 @@ async def test_oportunidades_debug(cuit: str):
             "tipo": str(type(e).__name__),
             "traceback": traceback.format_exc()
         }
+
+@app.get("/api/test/rubros-unicos")
+def test_rubros_unicos():
+    """Obtiene todos los rubros únicos de la base de datos"""
+    from database import execute_query
+
+    query = """
+        SELECT DISTINCT rubro, COUNT(*) as registros
+        FROM ventas
+        WHERE rubro IS NOT NULL
+        GROUP BY rubro
+        ORDER BY registros DESC
+    """
+
+    rubros = execute_query(query)
+    return {
+        "total_rubros": len(rubros),
+        "rubros": rubros
+    }
+
+@app.get("/api/test/rubros-cliente/{cuit}")
+def test_rubros_cliente(cuit: str):
+    """Obtiene los rubros que compra un cliente específico"""
+    from database import execute_query
+    from datetime import datetime, timedelta
+
+    anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
+
+    query = """
+        SELECT DISTINCT rubro
+        FROM ventas
+        WHERE cuit = :cuit
+        AND anio_mes >= :anio_mes_12_meses
+        AND rubro IS NOT NULL
+        ORDER BY rubro
+    """
+
+    rubros = execute_query(query, {"cuit": cuit, "anio_mes_12_meses": anio_mes_12_meses})
+    return {
+        "cuit": cuit,
+        "total_rubros": len(rubros),
+        "rubros": [r["rubro"] for r in rubros]
+    }
