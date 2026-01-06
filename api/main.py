@@ -214,3 +214,20 @@ async def test_perfil_full(cuit: str):
             "tipo": str(type(e).__name__),
             "traceback": traceback.format_exc()
         }
+
+@app.get("/api/test/oportunidades-debug/{cuit}")
+async def test_oportunidades_debug(cuit: str):
+    """Test completo del endpoint de oportunidades con debug detallado"""
+    from routes.oportunidades import get_oportunidades
+    import traceback
+
+    try:
+        result = await get_oportunidades(cuit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "tipo": str(type(e).__name__),
+            "traceback": traceback.format_exc()
+        }
