@@ -176,23 +176,19 @@ def test_perfil_debug(cuit: str):
     import traceback
 
     try:
-        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-
         query = """
             SELECT * FROM ventas
             WHERE cuit = :cuit
-            AND fecha >= :fecha_12_meses
-            ORDER BY fecha DESC
+            ORDER BY anio_mes DESC
             LIMIT 5
         """
 
-        ventas = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+        ventas = execute_query(query, {"cuit": cuit})
 
         return {
             "cuit": cuit,
-            "fecha_12_meses": fecha_12_meses,
             "total_ventas": len(ventas),
-            "primera_venta": ventas[0] if ventas else None,
+            "ventas_sample": ventas[:2] if ventas else [],
             "columnas": list(ventas[0].keys()) if ventas else []
         }
     except Exception as e:
