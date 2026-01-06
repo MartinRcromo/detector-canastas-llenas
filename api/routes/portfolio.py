@@ -9,52 +9,22 @@ from models.responses import PortfolioResponse, FamiliaConfirmada, FamiliaDispon
 
 router = APIRouter()
 
-# Mapeo de subrubros a familias (basado en la estructura del negocio)
-SUBRUBRO_A_FAMILIA = {
-    "Filtros": "Filtros",
-    "Frenos": "Frenos",
-    "Aceites": "Aceites y lubricantes",
-    "Lubricantes": "Aceites y lubricantes",
-    "Iluminación": "Iluminación",
-    "Lámparas": "Iluminación",
-    "Suspensión": "Suspensión",
-    "Amortiguadores": "Suspensión",
-    "Transmisión": "Transmisión",
-    "Embrague": "Embrague",
-    "Refrigeración": "Refrigeración",
-    "Baterías": "Baterías",
-    "Escapes": "Escapes",
-    "Distribución": "Distribución",
-    "Encendido": "Encendido",
-    "Eléctrico": "Eléctrico",
-    "Limpiaparabrisas": "Limpiaparabrisas",
-    "Dirección": "Dirección",
-    "Juntas": "Juntas",
-    "Retenes": "Retenes",
-}
-
-# Todas las familias posibles con iconos
+# Todas las familias posibles basadas en rubros reales de la BD
 FAMILIAS_TODAS = [
-    {"id": 1, "nombre": "Filtros", "icono": "Filter", "subfamilias": "(aire, aceite, combustible)"},
-    {"id": 2, "nombre": "Frenos", "icono": "Disc", "subfamilias": "(pastillas, discos, tambores)"},
-    {"id": 3, "nombre": "Aceites y lubricantes", "icono": "Droplet", "subfamilias": ""},
-    {"id": 4, "nombre": "Iluminación", "icono": "Lightbulb", "subfamilias": "(lámparas, faros)"},
-    {"id": 5, "nombre": "Suspensión", "icono": "Activity", "subfamilias": "(amortiguadores, resortes)"},
-    {"id": 6, "nombre": "Transmisión", "icono": "Cog", "subfamilias": ""},
-    {"id": 7, "nombre": "Embrague", "icono": "CircleDot", "subfamilias": ""},
-    {"id": 8, "nombre": "Refrigeración", "icono": "Wind", "subfamilias": ""},
-    {"id": 9, "nombre": "Baterías", "icono": "Battery", "subfamilias": ""},
-    {"id": 10, "nombre": "Escapes", "icono": "TrendingUp", "subfamilias": ""},
-    {"id": 11, "nombre": "Distribución", "icono": "Activity", "subfamilias": ""},
-    {"id": 12, "nombre": "Encendido", "icono": "Zap", "subfamilias": ""},
-    {"id": 13, "nombre": "Eléctrico", "icono": "Plug", "subfamilias": ""},
-    {"id": 14, "nombre": "Limpiaparabrisas", "icono": "Droplets", "subfamilias": ""},
-    {"id": 15, "nombre": "Dirección", "icono": "Navigation", "subfamilias": ""},
-    {"id": 16, "nombre": "Juntas", "icono": "Circle", "subfamilias": ""},
-    {"id": 17, "nombre": "Retenes", "icono": "Disc", "subfamilias": ""},
-    {"id": 18, "nombre": "Correas", "icono": "Link", "subfamilias": ""},
-    {"id": 19, "nombre": "Rodamientos", "icono": "Disc", "subfamilias": ""},
-    {"id": 20, "nombre": "Sistema de escape", "icono": "Wind", "subfamilias": ""},
+    {"id": 1, "nombre": "ILUMINACION", "icono": "Lightbulb", "subfamilias": "(faros, luces, lámparas)"},
+    {"id": 2, "nombre": "CERRAJERIA", "icono": "Key", "subfamilias": "(cerraduras, llaves)"},
+    {"id": 3, "nombre": "SISTEMA TERMICO", "icono": "Wind", "subfamilias": "(radiadores, termostatos)"},
+    {"id": 4, "nombre": "PARAGOLPES / PIEZAS PLASTICAS", "icono": "Box", "subfamilias": "(paragolpes, guardabarros)"},
+    {"id": 5, "nombre": "SISTEMA MOTRIZ", "icono": "Cog", "subfamilias": "(motor, transmisión)"},
+    {"id": 6, "nombre": "ESPEJOS", "icono": "Eye", "subfamilias": "(espejos retrovisores)"},
+    {"id": 7, "nombre": "EQUIPAMIENTO EXTERIOR", "icono": "Package", "subfamilias": "(molduras, accesorios)"},
+    {"id": 8, "nombre": "SISTEMA ELECTRICO", "icono": "Zap", "subfamilias": "(alternadores, baterías)"},
+    {"id": 9, "nombre": "ACCESORIOS", "icono": "Plus", "subfamilias": "(varios)"},
+    {"id": 10, "nombre": "EMERGENCIA / SEGURIDAD", "icono": "AlertTriangle", "subfamilias": "(matafuegos, balizas)"},
+    {"id": 11, "nombre": "EQUIPAMIENTO INTERIOR", "icono": "Home", "subfamilias": "(tapizados, consolas)"},
+    {"id": 12, "nombre": "CARROCERIA", "icono": "Layers", "subfamilias": "(chapas, paneles)"},
+    {"id": 13, "nombre": "SUSPENSION", "icono": "Activity", "subfamilias": "(amortiguadores, resortes)"},
+    {"id": 14, "nombre": "MERCHANDISING", "icono": "Gift", "subfamilias": "(promocionales)"},
 ]
 
 TOTAL_FAMILIAS = len(FAMILIAS_TODAS)
