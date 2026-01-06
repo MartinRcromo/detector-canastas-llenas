@@ -9,7 +9,7 @@ from collections import defaultdict
 from database import execute_query
 
 # Empresas del grupo para análisis
-EMPRESAS_GRUPO = ["CANASATA", "SURTIHOGAR"]
+EMPRESAS_GRUPO = ["Cromo", "BBA"]
 
 def obtener_clientes_similares(
     cuit_objetivo: str,
@@ -33,7 +33,7 @@ def obtener_clientes_similares(
 
     # Obtener facturación del cliente objetivo
     query_objetivo = """
-        SELECT monto FROM ventas
+        SELECT importe FROM ventas
         WHERE cuit = :cuit
         AND fecha >= :fecha_12_meses
         AND empresa = ANY(:empresas)
@@ -48,7 +48,7 @@ def obtener_clientes_similares(
     if not ventas_objetivo:
         return []
 
-    facturacion_objetivo = sum(v.get("monto", 0) for v in ventas_objetivo)
+    facturacion_objetivo = sum(v.get("importe", 0) for v in ventas_objetivo)
 
     # Definir rango de facturación
     if facturacion_min is None:
@@ -58,7 +58,7 @@ def obtener_clientes_similares(
 
     # Obtener todos los clientes y su facturación
     query_todos = """
-        SELECT cuit, monto FROM ventas
+        SELECT cuit, importe FROM ventas
         WHERE fecha >= :fecha_12_meses
         AND empresa = ANY(:empresas)
         AND cuit != :cuit_objetivo
@@ -77,9 +77,9 @@ def obtener_clientes_similares(
     facturacion_por_cliente = defaultdict(float)
     for venta in ventas_todos:
         cuit = venta.get("cuit")
-        monto = venta.get("monto", 0)
+        importe = venta.get("importe", 0)
         if cuit:
-            facturacion_por_cliente[cuit] += monto
+            facturacion_por_cliente[cuit] += importe
 
     # Filtrar por rango de facturación
     clientes_en_rango = []
@@ -273,7 +273,7 @@ def estimar_potencial_familia(
 
     # Obtener ventas de esta familia para clientes similares
     query = """
-        SELECT cuit, monto FROM ventas
+        SELECT cuit, importe FROM ventas
         WHERE subrubro = :familia
         AND cuit = ANY(:cuits)
         AND fecha >= :fecha_12_meses
@@ -291,7 +291,7 @@ def estimar_potencial_familia(
         return 100000.0  # Default si no hay datos
 
     # Calcular totales usando diccionarios
-    facturacion_total = sum(v.get("monto", 0) for v in ventas_familia)
+    facturacion_total = sum(v.get("importe", 0) for v in ventas_familia)
     cuits_unicos = set(v.get("cuit") for v in ventas_familia if v.get("cuit"))
     cantidad_clientes = len(cuits_unicos)
 

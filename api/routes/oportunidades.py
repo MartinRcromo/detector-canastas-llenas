@@ -47,7 +47,7 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
 
         # Obtener productos más vendidos de esta familia
         query = """
-            SELECT articulo_codigo, articulo_nombre, monto, cantidad
+            SELECT articulo_codigo, articulo_nombre, importe, cantidad
             FROM ventas
             WHERE subrubro = :familia
             AND fecha >= :fecha_12_meses
@@ -59,39 +59,39 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> list:
             return []
 
         # Agrupar por artículo usando diccionarios
-        productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": ""})
+        productos_dict = defaultdict(lambda: {"cantidad": 0, "importe": 0, "nombre": ""})
 
         for venta in productos_ventas:
             codigo = venta.get("articulo_codigo")
             nombre = venta.get("articulo_nombre", "")
             cantidad = venta.get("cantidad", 0)
-            monto = venta.get("monto", 0)
+            importe = venta.get("importe", 0)
 
             if codigo:
                 productos_dict[codigo]["cantidad"] += cantidad
-                productos_dict[codigo]["monto"] += monto
+                productos_dict[codigo]["importe"] += importe
                 if not productos_dict[codigo]["nombre"]:
                     productos_dict[codigo]["nombre"] = nombre
 
-        # Convertir a lista y ordenar por monto
+        # Convertir a lista y ordenar por importe
         productos_lista = [
             {
                 "codigo": codigo,
                 "nombre": datos["nombre"],
                 "cantidad": datos["cantidad"],
-                "monto": datos["monto"]
+                "importe": datos["importe"]
             }
             for codigo, datos in productos_dict.items()
         ]
 
-        productos_lista.sort(key=lambda x: x["monto"], reverse=True)
+        productos_lista.sort(key=lambda x: x["importe"], reverse=True)
         productos_top = productos_lista[:limit]
 
         # Formatear como ProductoSugerido
         productos = []
         for producto in productos_top:
             # Calcular precio promedio
-            precio = producto["monto"] / producto["cantidad"] if producto["cantidad"] > 0 else 0
+            precio = producto["importe"] / producto["cantidad"] if producto["cantidad"] > 0 else 0
 
             # Determinar demanda basada en cantidad vendida
             if producto["cantidad"] >= 100:
@@ -143,7 +143,7 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
 
         # Obtener top productos globales
         query_global = """
-            SELECT articulo_codigo, articulo_nombre, subrubro, monto, cantidad
+            SELECT articulo_codigo, articulo_nombre, subrubro, importe, cantidad
             FROM ventas
             WHERE fecha >= :fecha_12_meses
         """
@@ -154,38 +154,38 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> list:
             return []
 
         # Agrupar productos usando diccionarios
-        productos_dict = defaultdict(lambda: {"cantidad": 0, "monto": 0, "nombre": "", "subrubro": ""})
+        productos_dict = defaultdict(lambda: {"cantidad": 0, "importe": 0, "nombre": "", "subrubro": ""})
 
         for venta in productos_globales:
             codigo = venta.get("articulo_codigo")
             nombre = venta.get("articulo_nombre", "")
             subrubro = venta.get("subrubro", "")
             cantidad = venta.get("cantidad", 0)
-            monto = venta.get("monto", 0)
+            importe = venta.get("importe", 0)
 
             # Filtrar productos que el cliente YA tiene
             if codigo and codigo not in articulos_cliente:
                 productos_dict[codigo]["cantidad"] += cantidad
-                productos_dict[codigo]["monto"] += monto
+                productos_dict[codigo]["importe"] += importe
                 if not productos_dict[codigo]["nombre"]:
                     productos_dict[codigo]["nombre"] = nombre
                 if not productos_dict[codigo]["subrubro"]:
                     productos_dict[codigo]["subrubro"] = subrubro
 
-        # Convertir a lista y ordenar por monto
+        # Convertir a lista y ordenar por importe
         productos_lista = [
             {
                 "codigo": codigo,
                 "nombre": datos["nombre"],
                 "subrubro": datos["subrubro"],
                 "cantidad": datos["cantidad"],
-                "monto": datos["monto"],
-                "precio": datos["monto"] / datos["cantidad"] if datos["cantidad"] > 0 else 0
+                "importe": datos["importe"],
+                "precio": datos["importe"] / datos["cantidad"] if datos["cantidad"] > 0 else 0
             }
             for codigo, datos in productos_dict.items()
         ]
 
-        productos_lista.sort(key=lambda x: x["monto"], reverse=True)
+        productos_lista.sort(key=lambda x: x["importe"], reverse=True)
         productos_top = productos_lista[:limit]
 
         # Formatear como ProductoDestacado

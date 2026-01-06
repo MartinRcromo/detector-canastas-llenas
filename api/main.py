@@ -82,7 +82,7 @@ def test_list_clientes():
             COUNT(*) as cantidad_registros,
             SUM(importe) as total_importe
         FROM public.ventas
-        WHERE empresa IN ('CANASATA', 'SURTIHOGAR')
+        WHERE empresa IN ('Cromo', 'BBA')
         GROUP BY cuit, cliente
         ORDER BY total_importe DESC
         LIMIT 20
