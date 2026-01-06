@@ -167,3 +167,37 @@ def test_list_all_clientes():
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/api/test/perfil-debug/{cuit}")
+def test_perfil_debug(cuit: str):
+    """Debug endpoint para ver errores en perfil"""
+    from database import execute_query
+    from datetime import datetime, timedelta
+    import traceback
+
+    try:
+        fecha_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+        query = """
+            SELECT * FROM ventas
+            WHERE cuit = :cuit
+            AND fecha >= :fecha_12_meses
+            ORDER BY fecha DESC
+            LIMIT 5
+        """
+
+        ventas = execute_query(query, {"cuit": cuit, "fecha_12_meses": fecha_12_meses})
+
+        return {
+            "cuit": cuit,
+            "fecha_12_meses": fecha_12_meses,
+            "total_ventas": len(ventas),
+            "primera_venta": ventas[0] if ventas else None,
+            "columnas": list(ventas[0].keys()) if ventas else []
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "tipo": str(type(e).__name__),
+            "traceback": traceback.format_exc()
+        }
