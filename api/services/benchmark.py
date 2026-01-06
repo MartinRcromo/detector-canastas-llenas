@@ -48,7 +48,7 @@ def obtener_clientes_similares(
     if not ventas_objetivo:
         return []
 
-    facturacion_objetivo = sum(v.get("importe", 0) for v in ventas_objetivo)
+    facturacion_objetivo = float(sum(v.get("importe", 0) for v in ventas_objetivo))
 
     # Definir rango de facturación
     if facturacion_min is None:
@@ -291,7 +291,7 @@ def estimar_potencial_familia(
         return 100000.0  # Default si no hay datos
 
     # Calcular totales usando diccionarios
-    facturacion_total = sum(v.get("importe", 0) for v in ventas_familia)
+    facturacion_total = float(sum(v.get("importe", 0) for v in ventas_familia))
     cuits_unicos = set(v.get("cuit") for v in ventas_familia if v.get("cuit"))
     cantidad_clientes = len(cuits_unicos)
 

@@ -140,7 +140,7 @@ async def get_planes(cuit: str):
             # Cliente sin datos - asignar tier Bronze por defecto
             facturacion_anual = 0.0
         else:
-            facturacion_anual = sum(v.get("importe", 0) for v in ventas_data)
+            facturacion_anual = float(sum(v.get("importe", 0) for v in ventas_data))
 
         # Determinar tier actual
         tier_actual_nombre = calcular_tier_actual(facturacion_anual)
