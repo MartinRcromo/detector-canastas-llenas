@@ -3,8 +3,8 @@ import React, { createContext, useContext, useState } from 'react';
 
 const ClienteContext = createContext();
 
-// CUIT por defecto para desarrollo
-const DEFAULT_CUIT = '20301234567';
+// CUIT por defecto para desarrollo - Chapa Rolo S.R.L.
+const DEFAULT_CUIT = '30717287572';
 
 export function ClienteProvider({ children }) {
   const [cuit, setCuit] = useState(DEFAULT_CUIT);
