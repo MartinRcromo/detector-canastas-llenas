@@ -10,7 +10,8 @@ from models.responses import (
     OportunidadesResponse,
     OportunidadFamilia,
     ProductoSugerido,
-    ProductoDestacado
+    ProductoDestacado,
+    EstrategiaProductos
 )
 from services.benchmark import identificar_oportunidades
 from database import execute_query
@@ -21,9 +22,209 @@ router = APIRouter()
 EMPRESAS_GRUPO = ["Cromo", "BBA"]
 
 
+def calcular_clasificacion_abc_subrubro(subrubro: str):
+    """
+    Calcula la clasificación ABC de todos los productos de un subrubro
+    basada en el volumen de unidades vendidas (percentiles acumulados).
+
+    Clasificación:
+    - AA: 0-50% del volumen acumulado (los más vendidos)
+    - A:  50-80% del volumen acumulado
+    - B:  80-90% del volumen acumulado
+    - C:  90-100% del volumen acumulado
+
+    Args:
+        subrubro: Nombre del subrubro
+
+    Returns:
+        Dict con {articulo_codigo: {"clasificacion": "AA", "volumen": X, "precio_prom": Y}}
+    """
+    try:
+        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
+
+        query = """
+            SELECT
+                articulo_codigo,
+                articulo_descripcion,
+                SUM(unidades) as volumen_total,
+                SUM(importe) as importe_total
+            FROM ventas
+            WHERE subrubro = :subrubro
+            AND anio_mes >= :anio_mes_12_meses
+            AND empresa = ANY(:empresas)
+            AND articulo_codigo IS NOT NULL
+            GROUP BY articulo_codigo, articulo_descripcion
+            HAVING SUM(unidades) > 0
+            ORDER BY volumen_total DESC
+        """
+
+        productos = execute_query(query, {
+            "subrubro": subrubro,
+            "anio_mes_12_meses": anio_mes_12_meses,
+            "empresas": EMPRESAS_GRUPO
+        })
+
+        if not productos:
+            return {}
+
+        # Calcular volumen total del subrubro
+        volumen_total_subrubro = sum(int(p.get("volumen_total", 0) or 0) for p in productos)
+
+        if volumen_total_subrubro == 0:
+            return {}
+
+        # Calcular percentiles acumulados y clasificar
+        clasificaciones = {}
+        volumen_acumulado = 0
+
+        for p in productos:
+            codigo = p["articulo_codigo"]
+            volumen = int(p.get("volumen_total", 0) or 0)
+            importe = float(p.get("importe_total", 0) or 0)
+
+            # Calcular precio promedio
+            precio_prom = importe / volumen if volumen > 0 else 0
+
+            # Sumar al acumulado
+            volumen_acumulado += volumen
+            percentil_acumulado = (volumen_acumulado / volumen_total_subrubro) * 100
+
+            # Clasificar según percentil
+            if percentil_acumulado <= 50:
+                clasificacion = "AA"
+            elif percentil_acumulado <= 80:
+                clasificacion = "A"
+            elif percentil_acumulado <= 90:
+                clasificacion = "B"
+            else:
+                clasificacion = "C"
+
+            clasificaciones[codigo] = {
+                "clasificacion": clasificacion,
+                "volumen": volumen,
+                "precio_prom": round(precio_prom, 2),
+                "descripcion": p.get("articulo_descripcion", "")
+            }
+
+        return clasificaciones
+
+    except Exception as e:
+        print(f"Error calculando clasificación ABC para {subrubro}: {e}")
+        return {}
+
+
+def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str]) -> List[ProductoSugerido]:
+    """
+    Obtiene productos de un subrubro filtrados por clasificación ABC.
+
+    Args:
+        subrubro: Nombre del subrubro
+        clasificaciones_permitidas: Lista de clasificaciones a incluir (ej: ["AA"] o ["AA", "A"])
+
+    Returns:
+        Lista de ProductoSugerido ordenada por volumen descendente
+    """
+    try:
+        # Obtener clasificaciones ABC del subrubro
+        clasificaciones = calcular_clasificacion_abc_subrubro(subrubro)
+
+        if not clasificaciones:
+            return []
+
+        # Filtrar productos por clasificación
+        productos_resultado = []
+        for codigo, datos in clasificaciones.items():
+            if datos["clasificacion"] in clasificaciones_permitidas:
+                # Determinar demanda basada en volumen
+                volumen = datos["volumen"]
+                if volumen >= 100:
+                    demanda = "Alta"
+                elif volumen >= 50:
+                    demanda = "Media"
+                else:
+                    demanda = "Baja"
+
+                # Cantidad mínima sugerida (1 unidad por ahora, puede ajustarse)
+                cantidad_minima = 1
+                precio_unitario = datos["precio_prom"]
+
+                productos_resultado.append(ProductoSugerido(
+                    codigo=codigo,
+                    nombre=datos["descripcion"] or "Sin nombre",
+                    precio=precio_unitario,
+                    demanda=demanda,
+                    clasificacion_abc=datos["clasificacion"],
+                    volumen_12m=volumen,
+                    precio_total=round(precio_unitario * cantidad_minima, 2)
+                ))
+
+        # Ordenar por volumen descendente (ya vienen en orden pero por seguridad)
+        productos_resultado.sort(key=lambda x: x.volumen_12m, reverse=True)
+
+        return productos_resultado
+
+    except Exception as e:
+        print(f"Error obteniendo productos clasificados de {subrubro}: {e}")
+        return []
+
+
+def construir_estrategias(subrubro: str) -> tuple:
+    """
+    Construye las dos estrategias de productos para un subrubro:
+    1. "Quiero probar": Solo productos AA (mínimo riesgo, máximo volumen)
+    2. "Me tengo fe": Productos AA + A (más opciones, ajustable con slider)
+
+    Args:
+        subrubro: Nombre del subrubro
+
+    Returns:
+        Tupla (estrategia_probar, estrategia_fe)
+    """
+    try:
+        # Estrategia 1: Solo AA
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"])
+
+        monto_aa = sum(p.precio_total for p in productos_aa)
+
+        estrategia_probar = EstrategiaProductos(
+            tipo="probar",
+            productos=productos_aa,
+            monto_total_minimo=round(monto_aa, 2),
+            monto_total_maximo=round(monto_aa, 2),
+            cantidad_productos=len(productos_aa),
+            descripcion=f"Productos AA con mayor rotación ({len(productos_aa)} SKUs)"
+        )
+
+        # Estrategia 2: AA + A
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"])
+
+        monto_min_fe = monto_aa  # Mínimo: solo AA
+        monto_max_fe = sum(p.precio_total for p in productos_aa_a)  # Máximo: todos AA + A
+
+        estrategia_fe = EstrategiaProductos(
+            tipo="fe",
+            productos=productos_aa_a,
+            monto_total_minimo=round(monto_min_fe, 2),
+            monto_total_maximo=round(monto_max_fe, 2),
+            cantidad_productos=len(productos_aa_a),
+            descripcion=f"Productos AA + A expandidos ({len(productos_aa_a)} SKUs, ajustable con slider)"
+        )
+
+        return (estrategia_probar, estrategia_fe)
+
+    except Exception as e:
+        print(f"Error construyendo estrategias para {subrubro}: {e}")
+        # Retornar estrategias vacías
+        return (
+            EstrategiaProductos(tipo="probar", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos"),
+            EstrategiaProductos(tipo="fe", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos")
+        )
+
+
 def obtener_productos_top_familia(familia: str, limit: int = 3) -> List[ProductoSugerido]:
     """
-    Obtiene los productos más vendidos de una familia/subrubro
+    FUNCIÓN LEGACY - Mantener para retrocompatibilidad
+    Obtiene los productos AA más vendidos de una familia/subrubro
 
     Args:
         familia: Nombre del subrubro
@@ -33,55 +234,8 @@ def obtener_productos_top_familia(familia: str, limit: int = 3) -> List[Producto
         Lista de ProductoSugerido
     """
     try:
-        anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
-
-        query = """
-            SELECT
-                articulo_codigo,
-                articulo_descripcion,
-                SUM(importe) as total_importe,
-                SUM(unidades) as total_unidades
-            FROM ventas
-            WHERE subrubro = :familia
-            AND anio_mes >= :anio_mes_12_meses
-            AND empresa = ANY(:empresas)
-            AND articulo_codigo IS NOT NULL
-            GROUP BY articulo_codigo, articulo_descripcion
-            ORDER BY total_importe DESC
-            LIMIT :limit
-        """
-
-        productos = execute_query(query, {
-            "familia": familia,
-            "anio_mes_12_meses": anio_mes_12_meses,
-            "empresas": EMPRESAS_GRUPO,
-            "limit": limit
-        })
-
-        resultado = []
-        for p in productos:
-            total_importe = float(p.get("total_importe", 0) or 0)
-            total_unidades = int(p.get("total_unidades", 0) or 0)
-
-            # Calcular precio promedio
-            precio = total_importe / total_unidades if total_unidades > 0 else 0
-
-            # Determinar demanda basada en unidades
-            if total_unidades >= 100:
-                demanda = "Alta"
-            elif total_unidades >= 50:
-                demanda = "Media"
-            else:
-                demanda = "Baja"
-
-            resultado.append(ProductoSugerido(
-                codigo=p["articulo_codigo"],
-                nombre=p["articulo_descripcion"] or "Sin nombre",
-                precio=round(precio, 2),
-                demanda=demanda
-            ))
-
-        return resultado
+        productos_aa = obtener_productos_clasificados(familia, ["AA"])
+        return productos_aa[:limit]
 
     except Exception as e:
         print(f"Error obteniendo productos de {familia}: {e}")
@@ -244,8 +398,11 @@ async def get_oportunidades(cuit: str):
             else:
                 prioridad = "baja"
 
-            # Obtener productos sugeridos de esta familia
+            # Obtener productos sugeridos de esta familia (legacy)
             productos = obtener_productos_top_familia(opp["subrubro"], limit=3)
+
+            # NUEVO: Construir estrategias AA y AA+A
+            estrategia_probar, estrategia_fe = construir_estrategias(opp["subrubro"])
 
             # Construir razón descriptiva
             razon = f"Los líderes de tu segmento ({opp['cantidad_lideres']} clientes) " \
@@ -259,7 +416,9 @@ async def get_oportunidades(cuit: str):
                 potencial_mensual=round(potencial_mensual, 2),
                 productos_sugeridos=len(productos),
                 prioridad=prioridad,
-                productos=productos
+                productos=productos,  # Mantener para retrocompatibilidad
+                estrategia_probar=estrategia_probar,  # NUEVO
+                estrategia_fe=estrategia_fe  # NUEVO
             ))
 
             total_potencial += potencial_mensual

@@ -17,6 +17,8 @@ const OpportunitiesPage = () => {
   const { data: oportunidades, loading, error } = useApi(() => api.getOportunidades(cuit), [cuit]);
 
   const [familiaExpandida, setFamiliaExpandida] = useState(null);
+  const [estrategiaSeleccionada, setEstrategiaSeleccionada] = useState({}); // {familiaId: 'probar' | 'fe'}
+  const [montoSlider, setMontoSlider] = useState({}); // {familiaId: montoActual}
 
   if (loading) {
     return <Loading message="Analizando oportunidades de cross-selling..." />;
@@ -37,6 +39,73 @@ const OpportunitiesPage = () => {
 
   const toggleFamilia = (familiaId) => {
     setFamiliaExpandida(familiaExpandida === familiaId ? null : familiaId);
+  };
+
+  const seleccionarEstrategia = (familiaId, tipo) => {
+    setEstrategiaSeleccionada(prev => ({
+      ...prev,
+      [familiaId]: tipo
+    }));
+
+    // Inicializar slider con monto mínimo cuando se selecciona "fe"
+    if (tipo === 'fe') {
+      const familia = oportunidades.oportunidades_familias.find(f => f.id === familiaId);
+      if (familia) {
+        setMontoSlider(prev => ({
+          ...prev,
+          [familiaId]: familia.estrategia_fe.monto_total_minimo
+        }));
+      }
+    }
+  };
+
+  const actualizarMontoSlider = (familiaId, nuevoMonto) => {
+    setMontoSlider(prev => ({
+      ...prev,
+      [familiaId]: nuevoMonto
+    }));
+  };
+
+  const filtrarProductosPorMonto = (productos, montoMaximo) => {
+    // Ordenar productos por clasificación (AA primero) y precio
+    const productosOrdenados = [...productos].sort((a, b) => {
+      if (a.clasificacion_abc === 'AA' && b.clasificacion_abc !== 'AA') return -1;
+      if (a.clasificacion_abc !== 'AA' && b.clasificacion_abc === 'AA') return 1;
+      return a.precio - b.precio;
+    });
+
+    // Agregar productos hasta alcanzar el monto
+    const resultado = [];
+    let montoAcumulado = 0;
+
+    for (const producto of productosOrdenados) {
+      if (montoAcumulado + producto.precio_total <= montoMaximo) {
+        resultado.push(producto);
+        montoAcumulado += producto.precio_total;
+      }
+    }
+
+    return resultado;
+  };
+
+  const obtenerProductosSegunEstrategia = (opp) => {
+    const estrategia = estrategiaSeleccionada[opp.id];
+
+    if (!estrategia) {
+      // Por defecto mostrar productos legacy
+      return opp.productos;
+    }
+
+    if (estrategia === 'probar') {
+      return opp.estrategia_probar.productos;
+    }
+
+    if (estrategia === 'fe') {
+      const montoActual = montoSlider[opp.id] || opp.estrategia_fe.monto_total_minimo;
+      return filtrarProductosPorMonto(opp.estrategia_fe.productos, montoActual);
+    }
+
+    return opp.productos;
   };
 
   const getPrioridadColor = (prioridad) => {
@@ -141,37 +210,171 @@ const OpportunitiesPage = () => {
                   </div>
                 </div>
 
-                {/* Productos de la familia (expandible) */}
-                {familiaExpandida === opp.id && opp.productos && opp.productos.length > 0 && (
-                  <div className="mt-4 pt-4 border-t-2 border-gray-light animate-fade-in">
-                    <h4 className="font-semibold text-gray-graphite mb-3">
-                      Productos Sugeridos:
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {opp.productos.map((producto, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-gray-light rounded-lg p-4 hover:bg-orange-50 transition-colors"
+                {/* Estrategias y productos de la familia (expandible) */}
+                {familiaExpandida === opp.id && (
+                  <div className="mt-4 pt-4 border-t-2 border-gray-light animate-fade-in space-y-4">
+                    {/* Botones de estrategia */}
+                    <div>
+                      <h4 className="font-semibold text-gray-graphite mb-3">
+                        Seleccioná tu estrategia:
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Botón "Quiero probar" */}
+                        <button
+                          onClick={() => seleccionarEstrategia(opp.id, 'probar')}
+                          className={`p-4 rounded-lg border-2 transition-all text-left ${
+                            estrategiaSeleccionada[opp.id] === 'probar'
+                              ? 'border-blue-industrial bg-blue-50 shadow-md'
+                              : 'border-gray-300 bg-white hover:border-blue-300'
+                          }`}
                         >
                           <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1">
-                              <p className="font-medium text-blue-industrial text-sm">
-                                {producto.codigo}
-                              </p>
-                              <p className="text-xs text-gray-text mt-1">
-                                {producto.nombre}
+                            <h5 className="font-bold text-blue-industrial text-lg">
+                              🎯 Quiero probar
+                            </h5>
+                            <Badge className="bg-blue-100 text-blue-800">AA</Badge>
+                          </div>
+                          <p className="text-sm text-gray-text mb-2">
+                            {opp.estrategia_probar?.descripcion || 'Solo productos de máxima rotación'}
+                          </p>
+                          <p className="text-sm font-semibold text-blue-industrial">
+                            {opp.estrategia_probar?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_probar?.monto_total_minimo || 0)}
+                          </p>
+                        </button>
+
+                        {/* Botón "Me tengo fe" */}
+                        <button
+                          onClick={() => seleccionarEstrategia(opp.id, 'fe')}
+                          className={`p-4 rounded-lg border-2 transition-all text-left ${
+                            estrategiaSeleccionada[opp.id] === 'fe'
+                              ? 'border-orange-mechanic bg-orange-50 shadow-md'
+                              : 'border-gray-300 bg-white hover:border-orange-300'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <h5 className="font-bold text-orange-mechanic text-lg">
+                              🚀 Me tengo fe
+                            </h5>
+                            <Badge className="bg-orange-100 text-orange-800">AA + A</Badge>
+                          </div>
+                          <p className="text-sm text-gray-text mb-2">
+                            {opp.estrategia_fe?.descripcion || 'Productos AA + A expandidos con slider'}
+                          </p>
+                          <p className="text-sm font-semibold text-orange-mechanic">
+                            {opp.estrategia_fe?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_fe?.monto_total_minimo || 0)} - {formatCurrency(opp.estrategia_fe?.monto_total_maximo || 0)}
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Slider de monto (solo para estrategia "Me tengo fe") */}
+                    {estrategiaSeleccionada[opp.id] === 'fe' && opp.estrategia_fe && (
+                      <div className="bg-orange-50 p-4 rounded-lg">
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="font-semibold text-gray-graphite">
+                            Ajustá tu inversión:
+                          </label>
+                          <span className="text-xl font-bold text-orange-mechanic">
+                            {formatCurrency(montoSlider[opp.id] || opp.estrategia_fe.monto_total_minimo)}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={opp.estrategia_fe.monto_total_minimo}
+                          max={opp.estrategia_fe.monto_total_maximo}
+                          step={1000}
+                          value={montoSlider[opp.id] || opp.estrategia_fe.monto_total_minimo}
+                          onChange={(e) => actualizarMontoSlider(opp.id, parseFloat(e.target.value))}
+                          className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-orange-mechanic"
+                        />
+                        <div className="flex justify-between text-xs text-gray-text mt-1">
+                          <span>Mínimo: {formatCurrency(opp.estrategia_fe.monto_total_minimo)}</span>
+                          <span>Máximo: {formatCurrency(opp.estrategia_fe.monto_total_maximo)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Lista de productos según estrategia seleccionada */}
+                    {estrategiaSeleccionada[opp.id] && (
+                      <div>
+                        <h4 className="font-semibold text-gray-graphite mb-3">
+                          Productos seleccionados ({obtenerProductosSegunEstrategia(opp).length}):
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {obtenerProductosSegunEstrategia(opp).map((producto, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-white rounded-lg p-4 border-2 border-gray-200 hover:border-orange-mechanic transition-colors"
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Badge className={
+                                      producto.clasificacion_abc === 'AA'
+                                        ? 'bg-green-100 text-green-800 text-xs'
+                                        : 'bg-blue-100 text-blue-800 text-xs'
+                                    }>
+                                      {producto.clasificacion_abc}
+                                    </Badge>
+                                    <Badge className={`${getDemandaColor(producto.demanda)} text-xs`}>
+                                      {producto.demanda}
+                                    </Badge>
+                                  </div>
+                                  <p className="font-medium text-blue-industrial text-sm">
+                                    {producto.codigo}
+                                  </p>
+                                  <p className="text-xs text-gray-text mt-1">
+                                    {producto.nombre}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex justify-between items-center mt-2">
+                                <p className="text-lg font-bold text-orange-mechanic">
+                                  {formatCurrency(producto.precio)}
+                                </p>
+                                <span className="text-xs text-gray-text">
+                                  {formatNumber(producto.volumen_12m)} u/12m
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mostrar productos legacy si no hay estrategia seleccionada */}
+                    {!estrategiaSeleccionada[opp.id] && opp.productos && opp.productos.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-gray-graphite mb-3">
+                          Productos Sugeridos (seleccioná una estrategia arriba):
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 opacity-50">
+                          {opp.productos.map((producto, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-gray-light rounded-lg p-4"
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1">
+                                  <p className="font-medium text-blue-industrial text-sm">
+                                    {producto.codigo}
+                                  </p>
+                                  <p className="text-xs text-gray-text mt-1">
+                                    {producto.nombre}
+                                  </p>
+                                </div>
+                                <Badge className={`${getDemandaColor(producto.demanda)} text-xs`}>
+                                  {producto.demanda}
+                                </Badge>
+                              </div>
+                              <p className="text-lg font-bold text-orange-mechanic">
+                                {formatCurrency(producto.precio)}
                               </p>
                             </div>
-                            <Badge className={`${getDemandaColor(producto.demanda)} text-xs`}>
-                              {producto.demanda}
-                            </Badge>
-                          </div>
-                          <p className="text-lg font-bold text-orange-mechanic">
-                            {formatCurrency(producto.precio)}
-                          </p>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>

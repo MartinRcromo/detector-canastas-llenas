@@ -58,6 +58,18 @@ class ProductoSugerido(BaseModel):
     nombre: str
     precio: float
     demanda: str  # "Alta", "Media", "Baja"
+    clasificacion_abc: str  # "AA", "A", "B", "C"
+    volumen_12m: int  # Unidades vendidas últimos 12 meses
+    precio_total: float  # Precio * cantidad mínima sugerida
+
+class EstrategiaProductos(BaseModel):
+    """Estrategia de productos (Quiero probar / Me tengo fe)"""
+    tipo: str  # "probar" o "fe"
+    productos: List[ProductoSugerido]
+    monto_total_minimo: float
+    monto_total_maximo: float
+    cantidad_productos: int
+    descripcion: str
 
 class OportunidadFamilia(BaseModel):
     """Oportunidad de cross-selling por familia"""
@@ -67,7 +79,9 @@ class OportunidadFamilia(BaseModel):
     potencial_mensual: float
     productos_sugeridos: int
     prioridad: str  # "alta", "media", "baja"
-    productos: List[ProductoSugerido]
+    productos: List[ProductoSugerido]  # Mantener para retrocompatibilidad
+    estrategia_probar: EstrategiaProductos  # Solo AA
+    estrategia_fe: EstrategiaProductos  # AA + A
 
 class ProductoDestacado(BaseModel):
     """Producto destacado individual"""
