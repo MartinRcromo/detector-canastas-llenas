@@ -298,54 +298,55 @@ const OpportunitiesPage = () => {
                         <h4 className="font-semibold text-gray-graphite mb-3">
                           Seleccioná tu estrategia:
                         </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Botón "Quiero probar" */}
-                        <button
-                          onClick={() => seleccionarEstrategia(opp.id, 'probar')}
-                          className={`p-4 rounded-lg border-2 transition-all text-left ${
-                            estrategiaSeleccionada[opp.id] === 'probar'
-                              ? 'border-blue-industrial bg-blue-50 shadow-md'
-                              : 'border-gray-300 bg-white hover:border-blue-300'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <h5 className="font-bold text-blue-industrial text-lg">
-                              🎯 Quiero probar
-                            </h5>
-                            <Badge className="bg-blue-100 text-blue-800">AA</Badge>
-                          </div>
-                          <p className="text-sm text-gray-text mb-2">
-                            {opp.estrategia_probar?.descripcion || 'Solo productos de máxima rotación'}
-                          </p>
-                          <p className="text-sm font-semibold text-blue-industrial">
-                            {opp.estrategia_probar?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_probar?.monto_total_minimo || 0)}
-                          </p>
-                        </button>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Botón "Quiero probar" */}
+                          <button
+                            onClick={() => seleccionarEstrategia(opp.id, 'probar')}
+                            className={`p-4 rounded-lg border-2 transition-all text-left ${
+                              estrategiaSeleccionada[opp.id] === 'probar'
+                                ? 'border-blue-industrial bg-blue-50 shadow-md'
+                                : 'border-gray-300 bg-white hover:border-blue-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <h5 className="font-bold text-blue-industrial text-lg">
+                                🎯 Quiero probar
+                              </h5>
+                              <Badge className="bg-blue-100 text-blue-800">AA</Badge>
+                            </div>
+                            <p className="text-sm text-gray-text mb-2">
+                              {opp.estrategia_probar?.descripcion || 'Solo productos de máxima rotación'}
+                            </p>
+                            <p className="text-sm font-semibold text-blue-industrial">
+                              {opp.estrategia_probar?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_probar?.monto_total_minimo || 0)}
+                            </p>
+                          </button>
 
-                        {/* Botón "Me tengo fe" */}
-                        <button
-                          onClick={() => seleccionarEstrategia(opp.id, 'fe')}
-                          className={`p-4 rounded-lg border-2 transition-all text-left ${
-                            estrategiaSeleccionada[opp.id] === 'fe'
-                              ? 'border-orange-mechanic bg-orange-50 shadow-md'
-                              : 'border-gray-300 bg-white hover:border-orange-300'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <h5 className="font-bold text-orange-mechanic text-lg">
-                              🚀 Me tengo fe
-                            </h5>
-                            <Badge className="bg-orange-100 text-orange-800">AA + A</Badge>
-                          </div>
-                          <p className="text-sm text-gray-text mb-2">
-                            {opp.estrategia_fe?.descripcion || 'Productos AA + A expandidos con slider'}
-                          </p>
-                          <p className="text-sm font-semibold text-orange-mechanic">
-                            {opp.estrategia_fe?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_fe?.monto_total_minimo || 0)} - {formatCurrency(opp.estrategia_fe?.monto_total_maximo || 0)}
-                          </p>
-                        </button>
+                          {/* Botón "Me tengo fe" */}
+                          <button
+                            onClick={() => seleccionarEstrategia(opp.id, 'fe')}
+                            className={`p-4 rounded-lg border-2 transition-all text-left ${
+                              estrategiaSeleccionada[opp.id] === 'fe'
+                                ? 'border-orange-mechanic bg-orange-50 shadow-md'
+                                : 'border-gray-300 bg-white hover:border-orange-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <h5 className="font-bold text-orange-mechanic text-lg">
+                                🚀 Me tengo fe
+                              </h5>
+                              <Badge className="bg-orange-100 text-orange-800">AA + A</Badge>
+                            </div>
+                            <p className="text-sm text-gray-text mb-2">
+                              {opp.estrategia_fe?.descripcion || 'Productos AA + A expandidos con slider'}
+                            </p>
+                            <p className="text-sm font-semibold text-orange-mechanic">
+                              {opp.estrategia_fe?.cantidad_productos || 0} productos · {formatCurrency(opp.estrategia_fe?.monto_total_minimo || 0)} - {formatCurrency(opp.estrategia_fe?.monto_total_maximo || 0)}
+                            </p>
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Slider de monto (solo para estrategia 'Me tengo fe') */}
                     {estrategiaSeleccionada[opp.id] === 'fe' && opp.estrategia_fe && (
@@ -439,8 +440,6 @@ const OpportunitiesPage = () => {
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
                       </div>
                     )}
 
