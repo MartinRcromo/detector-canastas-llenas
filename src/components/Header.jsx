@@ -1,16 +1,17 @@
-import React from 'react';
-import { User, ShoppingCart } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, ShoppingCart, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useCliente } from '../context/ClienteContext';
+import { useCliente, CLIENTES_DISPONIBLES } from '../context/ClienteContext';
 import { useCart } from '../context/CartContext';
 import { useApi } from '../hooks/useApi';
 import api from '../services/api';
 
 const Header = () => {
   const navigate = useNavigate();
-  const { cuit } = useCliente();
+  const { cuit, cambiarCliente } = useCliente();
   const { cantidadTotal } = useCart();
   const { data: perfil } = useApi(() => api.getPerfil(cuit), [cuit]);
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
 
   // Formatear CUIT: 30717287572 -> 30-71728757-2
   const formatCuit = (cuitNumber) => {
@@ -57,8 +58,60 @@ const Header = () => {
               )}
             </button>
 
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <User className="w-5 h-5 text-blue-industrial" />
+            {/* Selector de Cliente */}
+            <div className="relative">
+              <button
+                onClick={() => setSelectorAbierto(!selectorAbierto)}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors"
+              >
+                <User className="w-5 h-5 text-blue-industrial" />
+                <ChevronDown className={`w-4 h-4 text-blue-industrial transition-transform ${selectorAbierto ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Dropdown de clientes */}
+              {selectorAbierto && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setSelectorAbierto(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 border-blue-100 z-50">
+                    <div className="p-2 border-b border-gray-200">
+                      <p className="text-xs text-gray-500 font-semibold uppercase px-2">
+                        Cambiar Cliente
+                      </p>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      {CLIENTES_DISPONIBLES.map(cliente => (
+                        <button
+                          key={cliente.cuit}
+                          onClick={() => {
+                            cambiarCliente(cliente.cuit);
+                            setSelectorAbierto(false);
+                            // Recargar la página para refrescar todos los datos
+                            window.location.reload();
+                          }}
+                          className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${
+                            cuit === cliente.cuit ? 'bg-blue-100 border-l-4 border-blue-industrial' : ''
+                          }`}
+                        >
+                          <p className="font-semibold text-blue-industrial text-sm">
+                            {cliente.nombre}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            CUIT: {formatCuit(cliente.cuit)}
+                          </p>
+                          {cuit === cliente.cuit && (
+                            <span className="text-xs text-blue-600 font-semibold mt-1 inline-block">
+                              ✓ Seleccionado
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
