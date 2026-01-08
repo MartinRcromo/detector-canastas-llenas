@@ -347,7 +347,7 @@ const OpportunitiesPage = () => {
                       </div>
                     </div>
 
-                    {/* Slider de monto (solo para estrategia "Me tengo fe") */}
+                    {/* Slider de monto (solo para estrategia 'Me tengo fe') */}
                     {estrategiaSeleccionada[opp.id] === 'fe' && opp.estrategia_fe && (
                       <div className="bg-orange-50 p-4 rounded-lg">
                         <div className="flex justify-between items-center mb-2">
