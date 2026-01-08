@@ -85,7 +85,8 @@ def obtener_lideres_benchmark(
     cluster_mix: str,
     cluster_especial: str,
     top1_subrubro: str,
-    min_pares: int = 5
+    min_pares: int = 5,
+    empresas: List[str] = None
 ) -> List[str]:
     """
     Identifica los líderes del micro-segmento (Top 25%)
@@ -101,10 +102,14 @@ def obtener_lideres_benchmark(
         cluster_especial: Rubro principal
         top1_subrubro: Subrubro principal
         min_pares: Mínimo de pares para considerar válido el micro-segmento
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Lista de CUITs de los líderes
     """
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
+
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # PASO 1: Intentar con criterio estricto (mix + especial + top1)
@@ -132,7 +137,7 @@ def obtener_lideres_benchmark(
         "cluster_especial": cluster_especial,
         "top1_subrubro": top1_subrubro,
         "anio_mes_12_meses": anio_mes_12_meses,
-        "empresas": EMPRESAS_GRUPO
+        "empresas": empresas
     })
 
     # PASO 2: Si no hay suficientes pares, relajar búsqueda (solo mix + especial)
@@ -159,7 +164,7 @@ def obtener_lideres_benchmark(
             "cluster_mix": cluster_mix,
             "cluster_especial": cluster_especial,
             "anio_mes_12_meses": anio_mes_12_meses,
-            "empresas": EMPRESAS_GRUPO
+            "empresas": empresas
         })
 
     if not clientes_segmento:
@@ -183,7 +188,7 @@ def obtener_lideres_benchmark(
     return lideres
 
 
-def calcular_canasta_ideal(cuits_lideres: List[str]) -> Dict[str, float]:
+def calcular_canasta_ideal(cuits_lideres: List[str], empresas: List[str] = None) -> Dict[str, float]:
     """
     Calcula la canasta ideal del segmento (Basket Share)
 
@@ -194,12 +199,16 @@ def calcular_canasta_ideal(cuits_lideres: List[str]) -> Dict[str, float]:
 
     Args:
         cuits_lideres: Lista de CUITs de los líderes
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Dict {subrubro: share_porcentaje}
     """
     if not cuits_lideres:
         return {}
+
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
 
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
@@ -218,7 +227,7 @@ def calcular_canasta_ideal(cuits_lideres: List[str]) -> Dict[str, float]:
     ventas_lideres = execute_query(query, {
         "cuits": cuits_lideres,
         "anio_mes_12_meses": anio_mes_12_meses,
-        "empresas": EMPRESAS_GRUPO
+        "empresas": empresas
     })
 
     if not ventas_lideres:
@@ -244,7 +253,8 @@ def calcular_canasta_ideal(cuits_lideres: List[str]) -> Dict[str, float]:
 def identificar_oportunidades(
     cuit_objetivo: str,
     min_gap_porcentaje: float = 20.0,
-    top_oportunidades: int = 10
+    top_oportunidades: int = 10,
+    empresas: List[str] = None
 ) -> List[Dict]:
     """
     Identifica oportunidades de cross-selling usando metodología Benchmark
@@ -265,6 +275,7 @@ def identificar_oportunidades(
         cuit_objetivo: CUIT del cliente
         min_gap_porcentaje: % mínimo de gap para considerar oportunidad
         top_oportunidades: Cantidad máxima de oportunidades a retornar
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Lista de oportunidades con formato:
@@ -277,6 +288,9 @@ def identificar_oportunidades(
             "share_ideal": float
         }
     """
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
+
     anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
     # PASO 1: Obtener cluster del cliente
@@ -289,14 +303,15 @@ def identificar_oportunidades(
     lideres = obtener_lideres_benchmark(
         cluster_mix=cluster["cluster_mix"],
         cluster_especial=cluster["cluster_especial"],
-        top1_subrubro=cluster["top1_rubro"]
+        top1_subrubro=cluster["top1_rubro"],
+        empresas=empresas
     )
 
     if not lideres:
         return []
 
     # PASO 3: Calcular canasta ideal
-    canasta_ideal = calcular_canasta_ideal(lideres)
+    canasta_ideal = calcular_canasta_ideal(lideres, empresas)
 
     if not canasta_ideal:
         return []
@@ -315,7 +330,7 @@ def identificar_oportunidades(
     ventas_cliente = execute_query(query_cliente, {
         "cuit": cuit_objetivo,
         "anio_mes_12_meses": anio_mes_12_meses,
-        "empresas": EMPRESAS_GRUPO
+        "empresas": empresas
     })
 
     # Convertir a dict para lookup rápido
