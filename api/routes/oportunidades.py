@@ -14,6 +14,7 @@ from models.responses import (
     EstrategiaProductos
 )
 from services.benchmark import identificar_oportunidades
+from services.brand_affinity import calcular_brand_affinity, filtrar_productos_por_marca
 from database import execute_query
 from utils.cache import clasificaciones_cache, estrategias_cache
 
@@ -252,14 +253,17 @@ def construir_estrategias_ligeras(subrubro: str) -> tuple:
         )
 
 
-def construir_estrategias_completas(subrubro: str, empresas: List[str] = None) -> tuple:
+def construir_estrategias_completas(subrubro: str, cuit: str = None, empresas: List[str] = None) -> tuple:
     """
     Construye estrategias CON productos completos (para lazy loading).
 
     **Uso**: Endpoint separado que se llama solo cuando el usuario expande.
 
+    **Brand Affinity**: Si se proporciona cuit, aplica filtro de marcas dominantes
+
     Args:
         subrubro: Nombre del subrubro
+        cuit: CUIT del cliente (para Brand Affinity)
         empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
@@ -269,26 +273,50 @@ def construir_estrategias_completas(subrubro: str, empresas: List[str] = None) -
         empresas = EMPRESAS_GRUPO
 
     try:
-        # Estrategia 1: Solo AA - Limitado a 20 para "probar"
+        # PASO 1: Calcular Brand Affinity del cliente (si se proporciona cuit)
+        marcas_dominantes = set()
+        if cuit:
+            marcas_dominantes = calcular_brand_affinity(cuit, threshold=0.10, empresas=empresas)
+            if marcas_dominantes:
+                print(f"[Brand Affinity] Cliente {cuit} - Marcas dominantes: {marcas_dominantes}")
+
+        # PASO 2: Obtener productos clasificados
         productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=20, empresas=empresas)
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100, empresas=empresas)
+
+        # PASO 3: Aplicar filtro de marcas si hay marcas dominantes
+        if marcas_dominantes:
+            # Convertir ProductoSugerido a dict para usar filtrar_productos_por_marca
+            productos_aa_dict = [p.dict() if hasattr(p, 'dict') else p.__dict__ for p in productos_aa]
+            productos_aa_a_dict = [p.dict() if hasattr(p, 'dict') else p.__dict__ for p in productos_aa_a]
+
+            productos_aa_filtrados = filtrar_productos_por_marca(productos_aa_dict, marcas_dominantes)
+            productos_aa_a_filtrados = filtrar_productos_por_marca(productos_aa_a_dict, marcas_dominantes)
+
+            # Convertir de vuelta a ProductoSugerido
+            productos_aa = [ProductoSugerido(**p) for p in productos_aa_filtrados]
+            productos_aa_a = [ProductoSugerido(**p) for p in productos_aa_a_filtrados]
+
+            print(f"[Brand Affinity] Productos AA: {len(productos_aa_dict)} → {len(productos_aa)} (filtrados)")
+            print(f"[Brand Affinity] Productos AA+A: {len(productos_aa_a_dict)} → {len(productos_aa_a)} (filtrados)")
+
+        # PASO 4: Construir estrategias
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
             tipo="probar",
-            productos=productos_aa,  # CON productos
+            productos=productos_aa,
             monto_total_minimo=round(monto_aa, 2),
             monto_total_maximo=round(monto_aa, 2),
             cantidad_productos=len(productos_aa),
             descripcion=f"Productos AA con mayor rotación ({len(productos_aa)} SKUs)"
         )
 
-        # Estrategia 2: AA + A
-        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100, empresas=empresas)
         monto_max_fe = sum(p.precio_total for p in productos_aa_a)
 
         estrategia_fe = EstrategiaProductos(
             tipo="fe",
-            productos=productos_aa_a,  # CON productos
+            productos=productos_aa_a,
             monto_total_minimo=round(monto_aa, 2),
             monto_total_maximo=round(monto_max_fe, 2),
             cantidad_productos=len(productos_aa_a),
@@ -430,7 +458,7 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> List[ProductoDest
 
 
 @router.get("/api/oportunidades/{cuit}/estrategias/{subrubro}")
-async def get_estrategias_subrubro(subrubro: str, empresa: str = None):
+async def get_estrategias_subrubro(cuit: str, subrubro: str, empresa: str = None):
     """
     Endpoint de lazy loading para obtener estrategias completas de un subrubro.
 
@@ -438,21 +466,25 @@ async def get_estrategias_subrubro(subrubro: str, empresa: str = None):
 
     **Optimización**: Reduce payload inicial y solo carga datos cuando se necesitan.
 
+    **Brand Affinity**: Aplica filtro de marcas dominantes del cliente
+
     Args:
+        cuit: CUIT del cliente (para Brand Affinity)
         subrubro: Nombre del subrubro
         empresa: Filtro opcional de empresa ('Cromo', 'BBA', o None para todas)
 
     Returns:
         {
-            "estrategia_probar": EstrategiaProductos (con productos),
-            "estrategia_fe": EstrategiaProductos (con productos)
+            "estrategia_probar": EstrategiaProductos (con productos filtrados por marca),
+            "estrategia_fe": EstrategiaProductos (con productos filtrados por marca)
         }
     """
     try:
         # Determinar lista de empresas según filtro
         empresas = [empresa] if empresa and empresa != 'todas' else EMPRESAS_GRUPO
 
-        estrategia_probar, estrategia_fe = construir_estrategias_completas(subrubro, empresas)
+        # Construir estrategias con Brand Affinity
+        estrategia_probar, estrategia_fe = construir_estrategias_completas(subrubro, cuit, empresas)
 
         return {
             "subrubro": subrubro,
