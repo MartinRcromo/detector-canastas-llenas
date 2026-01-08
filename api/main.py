@@ -216,6 +216,39 @@ async def test_perfil_full(cuit: str):
             "traceback": traceback.format_exc()
         }
 
+@app.get("/api/test/columnas-ventas")
+def test_columnas_ventas():
+    """Ver todas las columnas disponibles en la tabla ventas"""
+    from database import execute_query
+
+    try:
+        query = """
+            SELECT * FROM ventas
+            LIMIT 1
+        """
+
+        result = execute_query(query)
+
+        if result:
+            columnas = list(result[0].keys())
+            # Buscar columnas relacionadas con marcas
+            columnas_marca = [c for c in columnas if 'marca' in c.lower() or 'vehiculo' in c.lower() or 'aplicacion' in c.lower()]
+
+            return {
+                "total_columnas": len(columnas),
+                "todas_columnas": columnas,
+                "columnas_posible_marca": columnas_marca,
+                "muestra_datos": result[0]
+            }
+        else:
+            return {"error": "No hay datos en la tabla ventas"}
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "tipo": str(type(e).__name__)
+        }
+
 @app.get("/api/test/oportunidades-debug/{cuit}")
 async def test_oportunidades_debug(cuit: str):
     """Test completo del endpoint de oportunidades con debug detallado"""
