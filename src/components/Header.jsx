@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { User, ShoppingCart, ChevronDown } from 'lucide-react';
+import { User, ShoppingCart, ChevronDown, Building2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useCliente, CLIENTES_DISPONIBLES } from '../context/ClienteContext';
+import { useCliente, CLIENTES_DISPONIBLES, EMPRESAS_DISPONIBLES } from '../context/ClienteContext';
 import { useCart } from '../context/CartContext';
 import { useApi } from '../hooks/useApi';
 import api from '../services/api';
 
 const Header = () => {
   const navigate = useNavigate();
-  const { cuit, cambiarCliente } = useCliente();
+  const { cuit, cambiarCliente, empresaSeleccionada, cambiarEmpresa } = useCliente();
   const { cantidadTotal } = useCart();
   const { data: perfil } = useApi(() => api.getPerfil(cuit), [cuit]);
-  const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const [selectorClienteAbierto, setSelectorClienteAbierto] = useState(false);
+  const [selectorEmpresaAbierto, setSelectorEmpresaAbierto] = useState(false);
 
   // Formatear CUIT: 30717287572 -> 30-71728757-2
   const formatCuit = (cuitNumber) => {
@@ -58,22 +59,79 @@ const Header = () => {
               )}
             </button>
 
-            {/* Selector de Cliente */}
+            {/* Selector de Empresa */}
             <div className="relative">
               <button
-                onClick={() => setSelectorAbierto(!selectorAbierto)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors"
+                onClick={() => setSelectorEmpresaAbierto(!selectorEmpresaAbierto)}
+                className="flex items-center gap-2 px-3 py-2 bg-green-100 rounded-lg hover:bg-green-200 transition-colors"
+                title="Filtrar por empresa"
               >
-                <User className="w-5 h-5 text-blue-industrial" />
-                <ChevronDown className={`w-4 h-4 text-blue-industrial transition-transform ${selectorAbierto ? 'rotate-180' : ''}`} />
+                <Building2 className="w-5 h-5 text-green-700" />
+                <span className="text-xs font-semibold text-green-700 hidden md:inline">
+                  {EMPRESAS_DISPONIBLES.find(e => e.value === empresaSeleccionada)?.label || 'Todas'}
+                </span>
+                <ChevronDown className={`w-4 h-4 text-green-700 transition-transform ${selectorEmpresaAbierto ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* Dropdown de clientes */}
-              {selectorAbierto && (
+              {/* Dropdown de empresas */}
+              {selectorEmpresaAbierto && (
                 <>
                   <div
                     className="fixed inset-0 z-40"
-                    onClick={() => setSelectorAbierto(false)}
+                    onClick={() => setSelectorEmpresaAbierto(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border-2 border-green-100 z-50">
+                    <div className="p-2 border-b border-gray-200">
+                      <p className="text-xs text-gray-500 font-semibold uppercase px-2">
+                        Filtrar por Empresa
+                      </p>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto">
+                      {EMPRESAS_DISPONIBLES.map(empresa => (
+                        <button
+                          key={empresa.value}
+                          onClick={() => {
+                            cambiarEmpresa(empresa.value);
+                            setSelectorEmpresaAbierto(false);
+                            // Recargar la página para refrescar todos los datos
+                            window.location.reload();
+                          }}
+                          className={`w-full text-left px-4 py-3 hover:bg-green-50 transition-colors ${
+                            empresaSeleccionada === empresa.value ? 'bg-green-100 border-l-4 border-green-700' : ''
+                          }`}
+                        >
+                          <p className="font-semibold text-green-700 text-sm">
+                            {empresa.label}
+                          </p>
+                          {empresaSeleccionada === empresa.value && (
+                            <span className="text-xs text-green-600 font-semibold mt-1 inline-block">
+                              ✓ Seleccionado
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Selector de Cliente */}
+            <div className="relative">
+              <button
+                onClick={() => setSelectorClienteAbierto(!selectorClienteAbierto)}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors"
+              >
+                <User className="w-5 h-5 text-blue-industrial" />
+                <ChevronDown className={`w-4 h-4 text-blue-industrial transition-transform ${selectorClienteAbierto ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Dropdown de clientes */}
+              {selectorClienteAbierto && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setSelectorClienteAbierto(false)}
                   />
                   <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border-2 border-blue-100 z-50">
                     <div className="p-2 border-b border-gray-200">
@@ -87,7 +145,7 @@ const Header = () => {
                           key={cliente.cuit}
                           onClick={() => {
                             cambiarCliente(cliente.cuit);
-                            setSelectorAbierto(false);
+                            setSelectorClienteAbierto(false);
                             // Recargar la página para refrescar todos los datos
                             window.location.reload();
                           }}

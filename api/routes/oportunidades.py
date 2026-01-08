@@ -23,7 +23,7 @@ router = APIRouter()
 EMPRESAS_GRUPO = ["Cromo", "BBA"]
 
 
-def calcular_clasificacion_abc_subrubro(subrubro: str):
+def calcular_clasificacion_abc_subrubro(subrubro: str, empresas: List[str] = None):
     """
     Calcula la clasificación ABC de todos los productos de un subrubro
     basada en el volumen de unidades vendidas (percentiles acumulados).
@@ -38,12 +38,17 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
 
     Args:
         subrubro: Nombre del subrubro
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Dict con {articulo_codigo: {"clasificacion": "AA", "volumen": X, "precio_prom": Y}}
     """
-    # Verificar caché primero
-    cache_key = f"abc_{subrubro}"
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
+
+    # Verificar caché primero (incluir empresas en la clave)
+    empresas_str = "_".join(sorted(empresas))
+    cache_key = f"abc_{subrubro}_{empresas_str}"
     cached = clasificaciones_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -70,7 +75,7 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
         productos = execute_query(query, {
             "subrubro": subrubro,
             "anio_mes_12_meses": anio_mes_12_meses,
-            "empresas": EMPRESAS_GRUPO
+            "empresas": empresas
         })
 
         if not productos:
@@ -124,7 +129,7 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
         return {}
 
 
-def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str], limit: int = 100) -> List[ProductoSugerido]:
+def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str], limit: int = 100, empresas: List[str] = None) -> List[ProductoSugerido]:
     """
     Obtiene productos de un subrubro filtrados por clasificación ABC.
 
@@ -134,13 +139,17 @@ def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: Li
         subrubro: Nombre del subrubro
         clasificaciones_permitidas: Lista de clasificaciones a incluir (ej: ["AA"] o ["AA", "A"])
         limit: Máximo de productos a retornar (default: 100)
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Lista de ProductoSugerido ordenada por volumen descendente
     """
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
+
     try:
         # Obtener clasificaciones ABC del subrubro
-        clasificaciones = calcular_clasificacion_abc_subrubro(subrubro)
+        clasificaciones = calcular_clasificacion_abc_subrubro(subrubro, empresas)
 
         if not clasificaciones:
             return []
@@ -243,7 +252,7 @@ def construir_estrategias_ligeras(subrubro: str) -> tuple:
         )
 
 
-def construir_estrategias_completas(subrubro: str) -> tuple:
+def construir_estrategias_completas(subrubro: str, empresas: List[str] = None) -> tuple:
     """
     Construye estrategias CON productos completos (para lazy loading).
 
@@ -251,13 +260,17 @@ def construir_estrategias_completas(subrubro: str) -> tuple:
 
     Args:
         subrubro: Nombre del subrubro
+        empresas: Lista de empresas a filtrar (default: todas)
 
     Returns:
         Tupla (estrategia_probar, estrategia_fe) con productos
     """
+    if empresas is None:
+        empresas = EMPRESAS_GRUPO
+
     try:
         # Estrategia 1: Solo AA - Limitado a 20 para "probar"
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=20)
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=20, empresas=empresas)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
@@ -270,7 +283,7 @@ def construir_estrategias_completas(subrubro: str) -> tuple:
         )
 
         # Estrategia 2: AA + A
-        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100)
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100, empresas=empresas)
         monto_max_fe = sum(p.precio_total for p in productos_aa_a)
 
         estrategia_fe = EstrategiaProductos(
@@ -417,7 +430,7 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> List[ProductoDest
 
 
 @router.get("/api/oportunidades/{cuit}/estrategias/{subrubro}")
-async def get_estrategias_subrubro(subrubro: str):
+async def get_estrategias_subrubro(subrubro: str, empresa: str = None):
     """
     Endpoint de lazy loading para obtener estrategias completas de un subrubro.
 
@@ -427,6 +440,7 @@ async def get_estrategias_subrubro(subrubro: str):
 
     Args:
         subrubro: Nombre del subrubro
+        empresa: Filtro opcional de empresa ('Cromo', 'BBA', o None para todas)
 
     Returns:
         {
@@ -435,7 +449,10 @@ async def get_estrategias_subrubro(subrubro: str):
         }
     """
     try:
-        estrategia_probar, estrategia_fe = construir_estrategias_completas(subrubro)
+        # Determinar lista de empresas según filtro
+        empresas = [empresa] if empresa and empresa != 'todas' else EMPRESAS_GRUPO
+
+        estrategia_probar, estrategia_fe = construir_estrategias_completas(subrubro, empresas)
 
         return {
             "subrubro": subrubro,
@@ -451,7 +468,7 @@ async def get_estrategias_subrubro(subrubro: str):
 
 
 @router.get("/api/oportunidades/{cuit}", response_model=OportunidadesResponse)
-async def get_oportunidades(cuit: str):
+async def get_oportunidades(cuit: str, empresa: str = None):
     """
     Identifica oportunidades de cross-selling para un cliente usando la
     metodología Benchmark de Antigravity
@@ -465,16 +482,21 @@ async def get_oportunidades(cuit: str):
 
     Args:
         cuit: CUIT del cliente
+        empresa: Filtro opcional de empresa ('Cromo', 'BBA', o None para todas)
 
     Returns:
         OportunidadesResponse con oportunidades por familia y productos destacados
     """
     try:
+        # Determinar lista de empresas según filtro
+        empresas = [empresa] if empresa and empresa != 'todas' else EMPRESAS_GRUPO
+
         # Llamar al servicio de benchmark
         oportunidades_data = identificar_oportunidades(
             cuit_objetivo=cuit,
             min_gap_porcentaje=20.0,
-            top_oportunidades=10
+            top_oportunidades=10,
+            empresas=empresas
         )
 
         if not oportunidades_data:

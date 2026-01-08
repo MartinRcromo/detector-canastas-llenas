@@ -4,7 +4,14 @@ import React, { createContext, useContext, useState } from 'react';
 const ClienteContext = createContext();
 
 // CUIT por defecto para desarrollo - Chapa Rolo S.R.L. - ahora Frimar
-const DEFAULT_CUIT =  '20211152800'; 
+const DEFAULT_CUIT =  '20211152800';
+
+// Empresas disponibles
+export const EMPRESAS_DISPONIBLES = [
+  { value: 'todas', label: 'Todas las empresas' },
+  { value: 'Cromo', label: 'Cromosol' },
+  { value: 'BBA', label: 'BBA' }
+];
 
 // Lista de clientes disponibles para testing
 export const CLIENTES_DISPONIBLES = [
@@ -16,6 +23,7 @@ export const CLIENTES_DISPONIBLES = [
 
 export function ClienteProvider({ children }) {
   const [cuit, setCuit] = useState(DEFAULT_CUIT);
+  const [empresaSeleccionada, setEmpresaSeleccionada] = useState('todas');
 
   const cambiarCliente = (nuevoCuit) => {
     setCuit(nuevoCuit);
@@ -23,8 +31,20 @@ export function ClienteProvider({ children }) {
     localStorage.removeItem('carrito');
   };
 
+  const cambiarEmpresa = (nuevaEmpresa) => {
+    setEmpresaSeleccionada(nuevaEmpresa);
+    // Limpiar carrito al cambiar empresa
+    localStorage.removeItem('carrito');
+  };
+
   return (
-    <ClienteContext.Provider value={{ cuit, setCuit, cambiarCliente }}>
+    <ClienteContext.Provider value={{
+      cuit,
+      setCuit,
+      cambiarCliente,
+      empresaSeleccionada,
+      cambiarEmpresa
+    }}>
       {children}
     </ClienteContext.Provider>
   );

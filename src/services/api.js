@@ -30,23 +30,27 @@ class ApiService {
   }
 
   // PERFIL
-  async getPerfil(cuit) {
-    return this.request(`/api/perfil/${cuit}`);
+  async getPerfil(cuit, empresa = 'todas') {
+    const params = empresa !== 'todas' ? `?empresa=${empresa}` : '';
+    return this.request(`/api/perfil/${cuit}${params}`);
   }
 
   // PORTFOLIO
-  async getPortfolio(cuit) {
-    return this.request(`/api/portfolio/${cuit}`);
+  async getPortfolio(cuit, empresa = 'todas') {
+    const params = empresa !== 'todas' ? `?empresa=${empresa}` : '';
+    return this.request(`/api/portfolio/${cuit}${params}`);
   }
 
   // OPORTUNIDADES
-  async getOportunidades(cuit) {
-    return this.request(`/api/oportunidades/${cuit}`);
+  async getOportunidades(cuit, empresa = 'todas') {
+    const params = empresa !== 'todas' ? `?empresa=${empresa}` : '';
+    return this.request(`/api/oportunidades/${cuit}${params}`);
   }
 
   // ESTRATEGIAS (lazy loading)
-  async getEstrategias(cuit, subrubro) {
-    return this.request(`/api/oportunidades/${cuit}/estrategias/${encodeURIComponent(subrubro)}`);
+  async getEstrategias(cuit, subrubro, empresa = 'todas') {
+    const params = empresa !== 'todas' ? `?empresa=${empresa}` : '';
+    return this.request(`/api/oportunidades/${cuit}/estrategias/${encodeURIComponent(subrubro)}${params}`);
   }
 
   // PLANES

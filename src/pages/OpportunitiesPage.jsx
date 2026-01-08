@@ -14,9 +14,12 @@ import { formatCurrency, formatNumber } from '../utils/formatters';
 
 const OpportunitiesPage = () => {
   const navigate = useNavigate();
-  const { cuit } = useCliente();
+  const { cuit, empresaSeleccionada } = useCliente();
   const { agregarEstrategia } = useCart();
-  const { data: oportunidades, loading, error } = useApi(() => api.getOportunidades(cuit), [cuit]);
+  const { data: oportunidades, loading, error } = useApi(
+    () => api.getOportunidades(cuit, empresaSeleccionada),
+    [cuit, empresaSeleccionada]
+  );
 
   const [familiaExpandida, setFamiliaExpandida] = useState(null);
   const [estrategiaSeleccionada, setEstrategiaSeleccionada] = useState({}); // {familiaId: 'probar' | 'fe'}
@@ -55,7 +58,7 @@ const OpportunitiesPage = () => {
 
         try {
           // Lazy loading: cargar estrategias completas desde el servidor
-          const estrategias = await api.getEstrategias(cuit, opp.familia);
+          const estrategias = await api.getEstrategias(cuit, opp.familia, empresaSeleccionada);
 
           setEstrategiasCargadas(prev => ({
             ...prev,
