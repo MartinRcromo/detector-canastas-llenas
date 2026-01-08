@@ -20,7 +20,8 @@ const OpportunitiesPage = () => {
 
   const [familiaExpandida, setFamiliaExpandida] = useState(null);
   const [estrategiaSeleccionada, setEstrategiaSeleccionada] = useState({}); // {familiaId: 'probar' | 'fe'}
-  const [montoSlider, setMontoSlider] = useState({}); // {familiaId: montoActual}
+  const [montoSlider, setMontoSlider] = useState({}); // {familiaId: montoActual} - para "Me tengo fe"
+  const [cantidadSlider, setCantidadSlider] = useState({}); // {familiaId: cantidadActual} - para "Quiero probar"
   const [agregadoConfirmado, setAgregadoConfirmado] = useState({}); // {familiaId: true/false}
   const [estrategiasCargadas, setEstrategiasCargadas] = useState({}); // {familiaId: {estrategia_probar, estrategia_fe}}
   const [loadingEstrategias, setLoadingEstrategias] = useState({}); // {familiaId: true/false}
@@ -78,6 +79,22 @@ const OpportunitiesPage = () => {
       [familiaId]: tipo
     }));
 
+    // Inicializar slider con cantidad mínima cuando se selecciona "probar"
+    if (tipo === 'probar') {
+      const estrategiaCargada = estrategiasCargadas[familiaId]?.estrategia_probar;
+      const familia = oportunidades.oportunidades_familias.find(f => f.id === familiaId);
+      const estrategia = estrategiaCargada || familia?.estrategia_probar;
+
+      if (estrategia) {
+        // Inicializar con 5 productos (mínimo conservador)
+        const cantidadInicial = Math.min(5, estrategia.productos?.length || 5);
+        setCantidadSlider(prev => ({
+          ...prev,
+          [familiaId]: cantidadInicial
+        }));
+      }
+    }
+
     // Inicializar slider con monto mínimo cuando se selecciona "fe"
     if (tipo === 'fe') {
       // Intentar obtener de estrategias cargadas (lazy) primero, luego fallback a payload inicial
@@ -98,6 +115,13 @@ const OpportunitiesPage = () => {
     setMontoSlider(prev => ({
       ...prev,
       [familiaId]: nuevoMonto
+    }));
+  };
+
+  const actualizarCantidadSlider = (familiaId, nuevaCantidad) => {
+    setCantidadSlider(prev => ({
+      ...prev,
+      [familiaId]: nuevaCantidad
     }));
   };
 
@@ -147,7 +171,9 @@ const OpportunitiesPage = () => {
     }
 
     if (estrategia === 'probar') {
-      return estrategiaProbar.productos || [];
+      const cantidadActual = cantidadSlider[opp.id] || 5;
+      const productos = estrategiaProbar.productos || [];
+      return productos.slice(0, cantidadActual);
     }
 
     if (estrategia === 'fe') {
@@ -348,7 +374,34 @@ const OpportunitiesPage = () => {
                       </div>
                     )}
 
-                    {/* Slider de monto (solo para estrategia 'Me tengo fe') */}
+                    {/* Slider de cantidad (para estrategia "Quiero probar") */}
+                    {estrategiaSeleccionada[opp.id] === 'probar' && opp.estrategia_probar && (
+                      <div className="bg-blue-50 p-4 rounded-lg">
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="font-semibold text-gray-graphite">
+                            Cantidad de productos a probar:
+                          </label>
+                          <span className="text-xl font-bold text-blue-industrial">
+                            {cantidadSlider[opp.id] || 5} productos
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={3}
+                          max={Math.min(20, opp.estrategia_probar.productos?.length || 10)}
+                          step={1}
+                          value={cantidadSlider[opp.id] || 5}
+                          onChange={(e) => actualizarCantidadSlider(opp.id, parseInt(e.target.value))}
+                          className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-industrial"
+                        />
+                        <div className="flex justify-between text-xs text-gray-text mt-1">
+                          <span>Mínimo: 3 productos</span>
+                          <span>Máximo: {Math.min(20, opp.estrategia_probar.productos?.length || 10)} productos</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Slider de monto (para estrategia "Me tengo fe") */}
                     {estrategiaSeleccionada[opp.id] === 'fe' && opp.estrategia_fe && (
                       <div className="bg-orange-50 p-4 rounded-lg">
                         <div className="flex justify-between items-center mb-2">

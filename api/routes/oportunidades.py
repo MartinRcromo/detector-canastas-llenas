@@ -202,8 +202,8 @@ def construir_estrategias_ligeras(subrubro: str) -> tuple:
         return cached
 
     try:
-        # Estrategia 1: Solo AA (solo metadata)
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=100)
+        # Estrategia 1: Solo AA (solo metadata) - Limitado a 20 para "probar"
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=20)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
@@ -256,8 +256,8 @@ def construir_estrategias_completas(subrubro: str) -> tuple:
         Tupla (estrategia_probar, estrategia_fe) con productos
     """
     try:
-        # Estrategia 1: Solo AA
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=100)
+        # Estrategia 1: Solo AA - Limitado a 20 para "probar"
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=20)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
