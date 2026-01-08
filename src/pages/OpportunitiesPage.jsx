@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lightbulb, TrendingUp, Star, ChevronRight, ChevronDown, ChevronUp, ShoppingCart } from 'lucide-react';
+import { Lightbulb, TrendingUp, Star, ChevronRight, ChevronDown, ChevronUp, ShoppingCart, Check } from 'lucide-react';
 import { useCliente } from '../context/ClienteContext';
+import { useCart } from '../context/CartContext';
 import { useApi } from '../hooks/useApi';
 import api from '../services/api';
 import Card from '../components/Card';
@@ -14,11 +15,13 @@ import { formatCurrency, formatNumber } from '../utils/formatters';
 const OpportunitiesPage = () => {
   const navigate = useNavigate();
   const { cuit } = useCliente();
+  const { agregarEstrategia } = useCart();
   const { data: oportunidades, loading, error } = useApi(() => api.getOportunidades(cuit), [cuit]);
 
   const [familiaExpandida, setFamiliaExpandida] = useState(null);
   const [estrategiaSeleccionada, setEstrategiaSeleccionada] = useState({}); // {familiaId: 'probar' | 'fe'}
   const [montoSlider, setMontoSlider] = useState({}); // {familiaId: montoActual}
+  const [agregadoConfirmado, setAgregadoConfirmado] = useState({}); // {familiaId: true/false}
 
   if (loading) {
     return <Loading message="Analizando oportunidades de cross-selling..." />;
@@ -106,6 +109,27 @@ const OpportunitiesPage = () => {
     }
 
     return opp.productos;
+  };
+
+  const handleAgregarAlCarrito = (opp) => {
+    const productos = obtenerProductosSegunEstrategia(opp);
+    const estrategia = estrategiaSeleccionada[opp.id] || 'legacy';
+
+    agregarEstrategia(productos, opp.familia, estrategia);
+
+    // Mostrar confirmación
+    setAgregadoConfirmado(prev => ({
+      ...prev,
+      [opp.id]: true
+    }));
+
+    // Ocultar confirmación después de 2 segundos
+    setTimeout(() => {
+      setAgregadoConfirmado(prev => ({
+        ...prev,
+        [opp.id]: false
+      }));
+    }, 2000);
   };
 
   const getPrioridadColor = (prioridad) => {
@@ -297,9 +321,29 @@ const OpportunitiesPage = () => {
                     {/* Lista de productos según estrategia seleccionada */}
                     {estrategiaSeleccionada[opp.id] && (
                       <div>
-                        <h4 className="font-semibold text-gray-graphite mb-3">
-                          Productos seleccionados ({obtenerProductosSegunEstrategia(opp).length}):
-                        </h4>
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="font-semibold text-gray-graphite">
+                            Productos seleccionados ({obtenerProductosSegunEstrategia(opp).length}):
+                          </h4>
+                          <Button
+                            variant={agregadoConfirmado[opp.id] ? "outline" : "primary"}
+                            onClick={() => handleAgregarAlCarrito(opp)}
+                            disabled={agregadoConfirmado[opp.id]}
+                            className="flex items-center gap-2"
+                          >
+                            {agregadoConfirmado[opp.id] ? (
+                              <>
+                                <Check size={18} />
+                                Agregado
+                              </>
+                            ) : (
+                              <>
+                                <ShoppingCart size={18} />
+                                Agregar al carrito
+                              </>
+                            )}
+                          </Button>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                           {obtenerProductosSegunEstrategia(opp).map((producto, idx) => (
                             <div
