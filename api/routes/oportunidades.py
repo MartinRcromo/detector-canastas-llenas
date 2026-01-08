@@ -124,16 +124,16 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
         return {}
 
 
-def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str], limit: int = 50) -> List[ProductoSugerido]:
+def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str], limit: int = 100) -> List[ProductoSugerido]:
     """
     Obtiene productos de un subrubro filtrados por clasificación ABC.
 
-    **Optimizado: retorna máximo 50 productos (configurable)**
+    **Optimizado: retorna máximo 100 productos (configurable)**
 
     Args:
         subrubro: Nombre del subrubro
         clasificaciones_permitidas: Lista de clasificaciones a incluir (ej: ["AA"] o ["AA", "A"])
-        limit: Máximo de productos a retornar (default: 50)
+        limit: Máximo de productos a retornar (default: 100)
 
     Returns:
         Lista de ProductoSugerido ordenada por volumen descendente
@@ -203,7 +203,7 @@ def construir_estrategias_ligeras(subrubro: str) -> tuple:
 
     try:
         # Estrategia 1: Solo AA (solo metadata)
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=50)
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=100)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
@@ -216,7 +216,7 @@ def construir_estrategias_ligeras(subrubro: str) -> tuple:
         )
 
         # Estrategia 2: AA + A (solo metadata)
-        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=50)
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100)
         monto_max_fe = sum(p.precio_total for p in productos_aa_a)
 
         estrategia_fe = EstrategiaProductos(
@@ -257,7 +257,7 @@ def construir_estrategias_completas(subrubro: str) -> tuple:
     """
     try:
         # Estrategia 1: Solo AA
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=50)
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=100)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
@@ -270,7 +270,7 @@ def construir_estrategias_completas(subrubro: str) -> tuple:
         )
 
         # Estrategia 2: AA + A
-        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=50)
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=100)
         monto_max_fe = sum(p.precio_total for p in productos_aa_a)
 
         estrategia_fe = EstrategiaProductos(

@@ -136,6 +136,16 @@ const OpportunitiesPage = () => {
     const estrategiaProbar = estrategiaCargada?.estrategia_probar || opp.estrategia_probar;
     const estrategiaFe = estrategiaCargada?.estrategia_fe || opp.estrategia_fe;
 
+    // Debug: Log cuando hay problemas
+    if (estrategia === 'fe' && (!estrategiaFe.productos || estrategiaFe.productos.length === 0)) {
+      console.log(`[DEBUG ${opp.familia}] Me tengo fe sin productos:`, {
+        estrategiaCargada: !!estrategiaCargada,
+        productosEnCargada: estrategiaCargada?.estrategia_fe?.productos?.length || 0,
+        productosEnOpp: opp.estrategia_fe?.productos?.length || 0,
+        cantidadTotal: estrategiaFe.cantidad_productos
+      });
+    }
+
     if (estrategia === 'probar') {
       return estrategiaProbar.productos || [];
     }
