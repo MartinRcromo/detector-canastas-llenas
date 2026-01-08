@@ -22,6 +22,8 @@ const OpportunitiesPage = () => {
   const [estrategiaSeleccionada, setEstrategiaSeleccionada] = useState({}); // {familiaId: 'probar' | 'fe'}
   const [montoSlider, setMontoSlider] = useState({}); // {familiaId: montoActual}
   const [agregadoConfirmado, setAgregadoConfirmado] = useState({}); // {familiaId: true/false}
+  const [estrategiasCargadas, setEstrategiasCargadas] = useState({}); // {familiaId: {estrategia_probar, estrategia_fe}}
+  const [loadingEstrategias, setLoadingEstrategias] = useState({}); // {familiaId: true/false}
 
   if (loading) {
     return <Loading message="Analizando oportunidades de cross-selling..." />;
@@ -40,8 +42,34 @@ const OpportunitiesPage = () => {
     return null;
   }
 
-  const toggleFamilia = (familiaId) => {
-    setFamiliaExpandida(familiaExpandida === familiaId ? null : familiaId);
+  const toggleFamilia = async (familiaId) => {
+    const nuevoEstado = familiaExpandida === familiaId ? null : familiaId;
+    setFamiliaExpandida(nuevoEstado);
+
+    // Si está expandiendo (no colapsando) y no tiene estrategias cargadas
+    if (nuevoEstado !== null && !estrategiasCargadas[familiaId]) {
+      const opp = oportunidades.oportunidades_familias.find(o => o.id === familiaId);
+      if (opp) {
+        setLoadingEstrategias(prev => ({ ...prev, [familiaId]: true }));
+
+        try {
+          // Lazy loading: cargar estrategias completas desde el servidor
+          const estrategias = await api.getEstrategias(cuit, opp.familia);
+
+          setEstrategiasCargadas(prev => ({
+            ...prev,
+            [familiaId]: {
+              estrategia_probar: estrategias.estrategia_probar,
+              estrategia_fe: estrategias.estrategia_fe
+            }
+          }));
+        } catch (error) {
+          console.error(`Error cargando estrategias para ${opp.familia}:`, error);
+        } finally {
+          setLoadingEstrategias(prev => ({ ...prev, [familiaId]: false }));
+        }
+      }
+    }
   };
 
   const seleccionarEstrategia = (familiaId, tipo) => {
@@ -52,11 +80,15 @@ const OpportunitiesPage = () => {
 
     // Inicializar slider con monto mínimo cuando se selecciona "fe"
     if (tipo === 'fe') {
+      // Intentar obtener de estrategias cargadas (lazy) primero, luego fallback a payload inicial
+      const estrategiaCargada = estrategiasCargadas[familiaId]?.estrategia_fe;
       const familia = oportunidades.oportunidades_familias.find(f => f.id === familiaId);
-      if (familia) {
+      const estrategia = estrategiaCargada || familia?.estrategia_fe;
+
+      if (estrategia) {
         setMontoSlider(prev => ({
           ...prev,
-          [familiaId]: familia.estrategia_fe.monto_total_minimo
+          [familiaId]: estrategia.monto_total_minimo
         }));
       }
     }
@@ -99,13 +131,18 @@ const OpportunitiesPage = () => {
       return opp.productos;
     }
 
+    // Obtener estrategias de lazy loading (si están cargadas) o del payload inicial
+    const estrategiaCargada = estrategiasCargadas[opp.id];
+    const estrategiaProbar = estrategiaCargada?.estrategia_probar || opp.estrategia_probar;
+    const estrategiaFe = estrategiaCargada?.estrategia_fe || opp.estrategia_fe;
+
     if (estrategia === 'probar') {
-      return opp.estrategia_probar.productos;
+      return estrategiaProbar.productos || [];
     }
 
     if (estrategia === 'fe') {
-      const montoActual = montoSlider[opp.id] || opp.estrategia_fe.monto_total_minimo;
-      return filtrarProductosPorMonto(opp.estrategia_fe.productos, montoActual);
+      const montoActual = montoSlider[opp.id] || estrategiaFe.monto_total_minimo;
+      return filtrarProductosPorMonto(estrategiaFe.productos || [], montoActual);
     }
 
     return opp.productos;
@@ -237,11 +274,20 @@ const OpportunitiesPage = () => {
                 {/* Estrategias y productos de la familia (expandible) */}
                 {familiaExpandida === opp.id && (
                   <div className="mt-4 pt-4 border-t-2 border-gray-light animate-fade-in space-y-4">
-                    {/* Botones de estrategia */}
-                    <div>
-                      <h4 className="font-semibold text-gray-graphite mb-3">
-                        Seleccioná tu estrategia:
-                      </h4>
+                    {/* Loading de estrategias */}
+                    {loadingEstrategias[opp.id] && (
+                      <div className="text-center py-8">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-orange-mechanic border-t-transparent"></div>
+                        <p className="text-sm text-gray-text mt-2">Cargando productos...</p>
+                      </div>
+                    )}
+
+                    {/* Botones de estrategia (solo mostrar cuando terminó de cargar) */}
+                    {!loadingEstrategias[opp.id] && (
+                      <div>
+                        <h4 className="font-semibold text-gray-graphite mb-3">
+                          Seleccioná tu estrategia:
+                        </h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Botón "Quiero probar" */}
                         <button
@@ -385,9 +431,11 @@ const OpportunitiesPage = () => {
                         </div>
                       </div>
                     )}
+                      </div>
+                    )}
 
                     {/* Mostrar productos legacy si no hay estrategia seleccionada */}
-                    {!estrategiaSeleccionada[opp.id] && opp.productos && opp.productos.length > 0 && (
+                    {!loadingEstrategias[opp.id] && !estrategiaSeleccionada[opp.id] && opp.productos && opp.productos.length > 0 && (
                       <div>
                         <h4 className="font-semibold text-gray-graphite mb-3">
                           Productos Sugeridos (seleccioná una estrategia arriba):

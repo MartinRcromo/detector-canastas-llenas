@@ -15,6 +15,7 @@ from models.responses import (
 )
 from services.benchmark import identificar_oportunidades
 from database import execute_query
+from utils.cache import clasificaciones_cache, estrategias_cache
 
 router = APIRouter()
 
@@ -26,6 +27,8 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
     """
     Calcula la clasificación ABC de todos los productos de un subrubro
     basada en el volumen de unidades vendidas (percentiles acumulados).
+
+    **Optimizado con caché de 10 minutos**
 
     Clasificación:
     - AA: 0-50% del volumen acumulado (los más vendidos)
@@ -39,6 +42,12 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
     Returns:
         Dict con {articulo_codigo: {"clasificacion": "AA", "volumen": X, "precio_prom": Y}}
     """
+    # Verificar caché primero
+    cache_key = f"abc_{subrubro}"
+    cached = clasificaciones_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         anio_mes_12_meses = (datetime.now() - timedelta(days=365)).strftime("%Y-%m")
 
@@ -106,6 +115,8 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
                 "descripcion": p.get("articulo_descripcion", "")
             }
 
+        # Guardar en caché
+        clasificaciones_cache.set(cache_key, clasificaciones)
         return clasificaciones
 
     except Exception as e:
@@ -113,13 +124,16 @@ def calcular_clasificacion_abc_subrubro(subrubro: str):
         return {}
 
 
-def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str]) -> List[ProductoSugerido]:
+def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: List[str], limit: int = 50) -> List[ProductoSugerido]:
     """
     Obtiene productos de un subrubro filtrados por clasificación ABC.
+
+    **Optimizado: retorna máximo 50 productos (configurable)**
 
     Args:
         subrubro: Nombre del subrubro
         clasificaciones_permitidas: Lista de clasificaciones a incluir (ej: ["AA"] o ["AA", "A"])
+        limit: Máximo de productos a retornar (default: 50)
 
     Returns:
         Lista de ProductoSugerido ordenada por volumen descendente
@@ -161,34 +175,94 @@ def obtener_productos_clasificados(subrubro: str, clasificaciones_permitidas: Li
         # Ordenar por volumen descendente (ya vienen en orden pero por seguridad)
         productos_resultado.sort(key=lambda x: x.volumen_12m, reverse=True)
 
-        return productos_resultado
+        # Limitar cantidad de productos para performance
+        return productos_resultado[:limit]
 
     except Exception as e:
         print(f"Error obteniendo productos clasificados de {subrubro}: {e}")
         return []
 
 
-def construir_estrategias(subrubro: str) -> tuple:
+def construir_estrategias_ligeras(subrubro: str) -> tuple:
     """
-    Construye las dos estrategias de productos para un subrubro:
-    1. "Quiero probar": Solo productos AA (mínimo riesgo, máximo volumen)
-    2. "Me tengo fe": Productos AA + A (más opciones, ajustable con slider)
+    Construye metadata de estrategias SIN productos completos (para payload inicial ligero).
+
+    **Optimización**: Solo calcula cantidades y montos, no carga productos.
 
     Args:
         subrubro: Nombre del subrubro
 
     Returns:
-        Tupla (estrategia_probar, estrategia_fe)
+        Tupla (estrategia_probar_metadata, estrategia_fe_metadata)
     """
-    try:
-        # Estrategia 1: Solo AA
-        productos_aa = obtener_productos_clasificados(subrubro, ["AA"])
+    # Verificar caché
+    cache_key = f"estrategias_light_{subrubro}"
+    cached = estrategias_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
+    try:
+        # Estrategia 1: Solo AA (solo metadata)
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=50)
         monto_aa = sum(p.precio_total for p in productos_aa)
 
         estrategia_probar = EstrategiaProductos(
             tipo="probar",
-            productos=productos_aa,
+            productos=[],  # Vacío para payload ligero
+            monto_total_minimo=round(monto_aa, 2),
+            monto_total_maximo=round(monto_aa, 2),
+            cantidad_productos=len(productos_aa),
+            descripcion=f"Productos AA con mayor rotación ({len(productos_aa)} SKUs)"
+        )
+
+        # Estrategia 2: AA + A (solo metadata)
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=50)
+        monto_max_fe = sum(p.precio_total for p in productos_aa_a)
+
+        estrategia_fe = EstrategiaProductos(
+            tipo="fe",
+            productos=[],  # Vacío para payload ligero
+            monto_total_minimo=round(monto_aa, 2),
+            monto_total_maximo=round(monto_max_fe, 2),
+            cantidad_productos=len(productos_aa_a),
+            descripcion=f"Productos AA + A expandidos ({len(productos_aa_a)} SKUs, ajustable con slider)"
+        )
+
+        resultado = (estrategia_probar, estrategia_fe)
+
+        # Guardar en caché
+        estrategias_cache.set(cache_key, resultado)
+
+        return resultado
+
+    except Exception as e:
+        print(f"Error construyendo estrategias para {subrubro}: {e}")
+        return (
+            EstrategiaProductos(tipo="probar", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos"),
+            EstrategiaProductos(tipo="fe", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos")
+        )
+
+
+def construir_estrategias_completas(subrubro: str) -> tuple:
+    """
+    Construye estrategias CON productos completos (para lazy loading).
+
+    **Uso**: Endpoint separado que se llama solo cuando el usuario expande.
+
+    Args:
+        subrubro: Nombre del subrubro
+
+    Returns:
+        Tupla (estrategia_probar, estrategia_fe) con productos
+    """
+    try:
+        # Estrategia 1: Solo AA
+        productos_aa = obtener_productos_clasificados(subrubro, ["AA"], limit=50)
+        monto_aa = sum(p.precio_total for p in productos_aa)
+
+        estrategia_probar = EstrategiaProductos(
+            tipo="probar",
+            productos=productos_aa,  # CON productos
             monto_total_minimo=round(monto_aa, 2),
             monto_total_maximo=round(monto_aa, 2),
             cantidad_productos=len(productos_aa),
@@ -196,15 +270,13 @@ def construir_estrategias(subrubro: str) -> tuple:
         )
 
         # Estrategia 2: AA + A
-        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"])
-
-        monto_min_fe = monto_aa  # Mínimo: solo AA
-        monto_max_fe = sum(p.precio_total for p in productos_aa_a)  # Máximo: todos AA + A
+        productos_aa_a = obtener_productos_clasificados(subrubro, ["AA", "A"], limit=50)
+        monto_max_fe = sum(p.precio_total for p in productos_aa_a)
 
         estrategia_fe = EstrategiaProductos(
             tipo="fe",
-            productos=productos_aa_a,
-            monto_total_minimo=round(monto_min_fe, 2),
+            productos=productos_aa_a,  # CON productos
+            monto_total_minimo=round(monto_aa, 2),
             monto_total_maximo=round(monto_max_fe, 2),
             cantidad_productos=len(productos_aa_a),
             descripcion=f"Productos AA + A expandidos ({len(productos_aa_a)} SKUs, ajustable con slider)"
@@ -214,7 +286,6 @@ def construir_estrategias(subrubro: str) -> tuple:
 
     except Exception as e:
         print(f"Error construyendo estrategias para {subrubro}: {e}")
-        # Retornar estrategias vacías
         return (
             EstrategiaProductos(tipo="probar", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos"),
             EstrategiaProductos(tipo="fe", productos=[], monto_total_minimo=0, monto_total_maximo=0, cantidad_productos=0, descripcion="Error al cargar productos")
@@ -345,6 +416,40 @@ def obtener_productos_destacados(cuit: str, limit: int = 3) -> List[ProductoDest
         return []
 
 
+@router.get("/api/oportunidades/{cuit}/estrategias/{subrubro}")
+async def get_estrategias_subrubro(subrubro: str):
+    """
+    Endpoint de lazy loading para obtener estrategias completas de un subrubro.
+
+    **Uso**: Se llama solo cuando el usuario expande una oportunidad en el frontend.
+
+    **Optimización**: Reduce payload inicial y solo carga datos cuando se necesitan.
+
+    Args:
+        subrubro: Nombre del subrubro
+
+    Returns:
+        {
+            "estrategia_probar": EstrategiaProductos (con productos),
+            "estrategia_fe": EstrategiaProductos (con productos)
+        }
+    """
+    try:
+        estrategia_probar, estrategia_fe = construir_estrategias_completas(subrubro)
+
+        return {
+            "subrubro": subrubro,
+            "estrategia_probar": estrategia_probar,
+            "estrategia_fe": estrategia_fe
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al obtener estrategias: {str(e)}"
+        )
+
+
 @router.get("/api/oportunidades/{cuit}", response_model=OportunidadesResponse)
 async def get_oportunidades(cuit: str):
     """
@@ -401,8 +506,8 @@ async def get_oportunidades(cuit: str):
             # Obtener productos sugeridos de esta familia (legacy)
             productos = obtener_productos_top_familia(opp["subrubro"], limit=3)
 
-            # NUEVO: Construir estrategias AA y AA+A
-            estrategia_probar, estrategia_fe = construir_estrategias(opp["subrubro"])
+            # OPTIMIZADO: Construir estrategias LIGERAS (sin productos completos)
+            estrategia_probar, estrategia_fe = construir_estrategias_ligeras(opp["subrubro"])
 
             # Construir razón descriptiva
             razon = f"Los líderes de tu segmento ({opp['cantidad_lideres']} clientes) " \

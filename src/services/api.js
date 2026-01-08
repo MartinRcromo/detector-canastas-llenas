@@ -44,6 +44,11 @@ class ApiService {
     return this.request(`/api/oportunidades/${cuit}`);
   }
 
+  // ESTRATEGIAS (lazy loading)
+  async getEstrategias(cuit, subrubro) {
+    return this.request(`/api/oportunidades/${cuit}/estrategias/${encodeURIComponent(subrubro)}`);
+  }
+
   // PLANES
   async getPlanes(cuit) {
     return this.request(`/api/planes/${cuit}`);
