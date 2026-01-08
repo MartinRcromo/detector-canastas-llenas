@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState } from 'react';
 const ClienteContext = createContext();
 
 // CUIT por defecto para desarrollo - Chapa Rolo S.R.L. - ahora Frimar
-const DEFAULT_CUIT =  '30707208712'; 
+const DEFAULT_CUIT =  '20211152800'; 
 
 export function ClienteProvider({ children }) {
   const [cuit, setCuit] = useState(DEFAULT_CUIT);
