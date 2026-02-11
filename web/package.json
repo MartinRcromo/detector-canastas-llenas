@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed": "node --experimental-strip-types db/seed.ts",
+    "upload:image": "node --experimental-strip-types scripts/upload-product-image.ts"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.8.0",
@@ -22,7 +24,8 @@
     "recharts": "^2.10.0",
     "tailwind-merge": "^2.2.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.0"
+    "zod": "^3.22.0",
+    "playwright": "^1.52.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
