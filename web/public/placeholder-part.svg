@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360" viewBox="0 0 600 360" fill="none">
+  <rect width="600" height="360" fill="#0f172a"/>
+  <rect x="50" y="50" width="500" height="260" rx="12" fill="#1e293b" stroke="#334155" stroke-width="4"/>
+  <text x="300" y="170" text-anchor="middle" fill="#94a3b8" font-size="30" font-family="Arial, sans-serif">SIN IMAGEN</text>
+  <text x="300" y="210" text-anchor="middle" fill="#475569" font-size="20" font-family="Arial, sans-serif">Catálogo Autopartes</text>
+</svg>
